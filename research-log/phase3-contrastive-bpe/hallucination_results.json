@@ -1,0 +1,34 @@
+{
+  "energy_head": {
+    "correct_energy_mean": 0.0009436556487344205,
+    "correct_energy_std": 0.03865502843711347,
+    "wrong_energy_mean": 0.9842322638630867,
+    "wrong_energy_std": 0.08815709949954662,
+    "correct_accuracy": 100.0,
+    "wrong_accuracy": 99.0,
+    "pair_accuracy": 100.0,
+    "combined_accuracy": 99.0,
+    "threshold": 0.5,
+    "num_samples": 100
+  },
+  "energy_legacy": {
+    "correct_energy_mean": 1477.889275115967,
+    "correct_energy_std": 644.876877348988,
+    "wrong_energy_mean": 1461.0793194152832,
+    "wrong_energy_std": 657.6934278557789,
+    "energy_gap_mean": -16.809955700683567,
+    "energy_gap_std": 73.90471069170637,
+    "detection_rate": 50.0,
+    "num_samples": 100
+  },
+  "cross_token": {
+    "correct_energy_mean": 1707.3340370544433,
+    "correct_energy_std": 680.5052689596239,
+    "wrong_energy_mean": 1581.2737763916011,
+    "wrong_energy_std": 602.6581710821087,
+    "energy_gap_mean": -126.06026066284183,
+    "energy_gap_std": 992.3637046479998,
+    "detection_rate": 54.0,
+    "num_pairs": 100
+  }
+}
