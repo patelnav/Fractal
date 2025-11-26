@@ -1,0 +1,44 @@
+Building hierarchy from 1,115,394 characters...
+  Character vocab: 65 tokens
+  Chunk vocab: 2049 tokens (top 2048 + UNK)
+  Chunk coverage: 53.5% of text
+  Chunk sequence length: 278,848
+  UNK chunks: 129,684 (46.5%)
+  Root vocab: 2049 tokens (top 2048 + UNK)
+  Root coverage: 22.0% of text
+  Root sequence length: 69,712
+  UNK roots: 54,374 (78.0%)
+  Root->Chunks samples: 15,338
+  Chunk->Chars samples: 149,164
+
+=== Vocabulary Summary ===
+  Characters: 65 (IDs 0-64)
+  Chunks: 2049 (IDs 65-2113)
+  Roots: 2049 (IDs 2114-4162)
+  Total vocab: 4163
+Saved hierarchy to data/shakespeare_hierarchy.pkl
+
+=== Sample Root->Chunk Mappings ===
+  Root 1326: 'Firs????tize????' -> ['y.\n\n', 'e cr', 'oor ', 'e cr']
+  Root 95: '
+
+First ????????' -> ['e,\nA', ' am ', 'e cr', 'e cr']
+  Root 1327: '???? you kno????' -> ['e cr', ' you', ',\nAn', 'e cr']
+  Root 556: '????.
+
+First????' -> ['e cr', '\nWhi', ' min', 'e cr']
+  Root 1328: 'izen????????????' -> ['ANUS', 'e cr', 'e cr', 'e cr']
+
+=== Sample Chunk->Char Mappings ===
+  Chunk 519: 'y.
+
+' -> 'Firs'
+  Chunk 1499: 'oor ' -> 'tize'
+  Chunk 227: 'more' -> 'efor'
+  Chunk 479: ' som' -> 'e we'
+  Chunk 180: 'come' -> ' pro'
+
+=== Test Batch Generation ===
+  Conditions shape: torch.Size([8])
+  Targets shape: torch.Size([8, 4])
+  Sample conditions: [439, 1135, 2114, 2114]
