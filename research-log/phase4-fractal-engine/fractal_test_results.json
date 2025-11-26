@@ -1,0 +1,35 @@
+{
+  "level0": {
+    "level": 0,
+    "level_name": "Root->Chunks",
+    "correct_energy_mean": 0.0005668923258781433,
+    "correct_energy_std": 0.06548361480236053,
+    "wrong_energy_mean": 0.9411981105804443,
+    "wrong_energy_std": 0.14861242473125458,
+    "correct_below_threshold": 100.0,
+    "wrong_above_threshold": 95.99999785423279,
+    "pair_detection_rate": 100.0,
+    "num_samples": 100,
+    "passed": true
+  },
+  "level1": {
+    "level": 1,
+    "level_name": "Chunk->Chars",
+    "correct_energy_mean": 0.015276811085641384,
+    "correct_energy_std": 0.07428610324859619,
+    "wrong_energy_mean": 0.9794440269470215,
+    "wrong_energy_std": 0.15397481620311737,
+    "correct_below_threshold": 100.0,
+    "wrong_above_threshold": 98.00000190734863,
+    "pair_detection_rate": 99.00000095367432,
+    "num_samples": 100,
+    "passed": true
+  },
+  "cross_level": {
+    "level0_correct_level_energy": 0.02134479209780693,
+    "level0_wrong_level_energy": 0.46507278084754944,
+    "level1_correct_level_energy": 0.021379195153713226,
+    "level1_wrong_level_energy": 0.6229074001312256
+  },
+  "both_passed": true
+}
