@@ -30,7 +30,43 @@ import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-from model import OuroborosModel, OuroborosConfig, compute_contrastive_loss
+from model import OuroborosModel, OuroborosConfig
+
+
+def compute_paired_loss(model, contexts, correct_targets, wrong_targets,
+                        context_lens, correct_target_lens, wrong_target_lens):
+    """
+    Compute paired contrastive loss (like Phase 3).
+
+    Same context, but correct vs wrong targets.
+    Energy(correct) -> 0, Energy(wrong) -> 1
+    """
+    # Compute energy for correct targets
+    energy_correct, _ = model(contexts, correct_targets, context_lens, correct_target_lens)
+
+    # Compute energy for wrong targets
+    energy_wrong, _ = model(contexts, wrong_targets, context_lens, wrong_target_lens)
+
+    # Targets: correct -> 0, wrong -> 1
+    target_correct = torch.zeros_like(energy_correct)
+    target_wrong = torch.ones_like(energy_wrong)
+
+    # Paired MSE loss
+    loss = F.mse_loss(energy_correct, target_correct) + F.mse_loss(energy_wrong, target_wrong)
+
+    # Metrics
+    with torch.no_grad():
+        # Detection rate: wrong should have higher energy than correct
+        detection_rate = (energy_wrong > energy_correct).float().mean().item()
+
+        metrics = {
+            'loss': loss.item(),
+            'energy_correct': energy_correct.mean().item(),
+            'energy_wrong': energy_wrong.mean().item(),
+            'detection_rate': detection_rate,
+        }
+
+    return loss, metrics
 
 
 # -----------------------------------------------------------------------------
@@ -166,15 +202,16 @@ if master_process:
 # -----------------------------------------------------------------------------
 
 def load_data(split='train'):
-    """Load contrastive data from .npz file."""
+    """Load paired contrastive data from .npz file."""
     path = Path(data_dir) / f'{split}.npz'
     data = np.load(path)
     return {
         'contexts': torch.from_numpy(data['contexts'].astype(np.int64)),
-        'targets': torch.from_numpy(data['targets'].astype(np.int64)),
+        'correct_targets': torch.from_numpy(data['correct_targets'].astype(np.int64)),
+        'wrong_targets': torch.from_numpy(data['wrong_targets'].astype(np.int64)),
         'context_lens': torch.from_numpy(data['context_lens'].astype(np.int64)),
-        'target_lens': torch.from_numpy(data['target_lens'].astype(np.int64)),
-        'labels': torch.from_numpy(data['labels'].astype(np.int64)),
+        'correct_target_lens': torch.from_numpy(data['correct_target_lens'].astype(np.int64)),
+        'wrong_target_lens': torch.from_numpy(data['wrong_target_lens'].astype(np.int64)),
         'domains': torch.from_numpy(data['domains'].astype(np.int64)),
     }
 
@@ -183,38 +220,41 @@ def load_data(split='train'):
 print(f"Loading data from {data_dir}...")
 train_data = load_data('train')
 val_data = load_data('val')
-print(f"Train: {len(train_data['labels'])} samples, Val: {len(val_data['labels'])} samples")
+print(f"Train: {len(train_data['contexts'])} pairs, Val: {len(val_data['contexts'])} pairs")
 
 
 def get_batch(split='train'):
-    """Get a random batch of contrastive samples."""
+    """Get a random batch of paired samples (same context, correct vs wrong)."""
     data = train_data if split == 'train' else val_data
-    n = len(data['labels'])
+    n = len(data['contexts'])
 
     # Random indices
     idx = torch.randint(0, n, (batch_size,))
 
     contexts = data['contexts'][idx]
-    targets = data['targets'][idx]
+    correct_targets = data['correct_targets'][idx]
+    wrong_targets = data['wrong_targets'][idx]
     context_lens = data['context_lens'][idx]
-    target_lens = data['target_lens'][idx]
-    labels = data['labels'][idx]
+    correct_target_lens = data['correct_target_lens'][idx]
+    wrong_target_lens = data['wrong_target_lens'][idx]
 
     # Move to device
     if device_type == 'cuda':
         contexts = contexts.pin_memory().to(device, non_blocking=True)
-        targets = targets.pin_memory().to(device, non_blocking=True)
+        correct_targets = correct_targets.pin_memory().to(device, non_blocking=True)
+        wrong_targets = wrong_targets.pin_memory().to(device, non_blocking=True)
         context_lens = context_lens.pin_memory().to(device, non_blocking=True)
-        target_lens = target_lens.pin_memory().to(device, non_blocking=True)
-        labels = labels.pin_memory().to(device, non_blocking=True)
+        correct_target_lens = correct_target_lens.pin_memory().to(device, non_blocking=True)
+        wrong_target_lens = wrong_target_lens.pin_memory().to(device, non_blocking=True)
     else:
         contexts = contexts.to(device)
-        targets = targets.to(device)
+        correct_targets = correct_targets.to(device)
+        wrong_targets = wrong_targets.to(device)
         context_lens = context_lens.to(device)
-        target_lens = target_lens.to(device)
-        labels = labels.to(device)
+        correct_target_lens = correct_target_lens.to(device)
+        wrong_target_lens = wrong_target_lens.to(device)
 
-    return contexts, targets, context_lens, target_lens, labels
+    return contexts, correct_targets, wrong_targets, context_lens, correct_target_lens, wrong_target_lens
 
 
 # -----------------------------------------------------------------------------
@@ -303,12 +343,12 @@ def estimate_loss():
         metrics_list = []
 
         for _ in range(eval_iters):
-            contexts, targets, context_lens, target_lens, labels = get_batch(split)
+            contexts, correct_targets, wrong_targets, context_lens, correct_lens, wrong_lens = get_batch(split)
 
             with ctx:
-                loss, metrics = compute_contrastive_loss(
-                    model, contexts, targets, labels,
-                    context_lens, target_lens
+                loss, metrics = compute_paired_loss(
+                    model, contexts, correct_targets, wrong_targets,
+                    context_lens, correct_lens, wrong_lens
                 )
 
             losses.append(loss.item())
@@ -318,7 +358,7 @@ def estimate_loss():
             'loss': np.mean(losses),
             'energy_correct': np.mean([m['energy_correct'] for m in metrics_list]),
             'energy_wrong': np.mean([m['energy_wrong'] for m in metrics_list]),
-            'accuracy': np.mean([m['accuracy'] for m in metrics_list]),
+            'detection_rate': np.mean([m['detection_rate'] for m in metrics_list]),
         }
 
     model.train()
@@ -353,10 +393,10 @@ while iter_num < max_iters:
               f"val loss {losses['val']['loss']:.4f}")
         print(f"  Train: E_correct={losses['train']['energy_correct']:.4f}, "
               f"E_wrong={losses['train']['energy_wrong']:.4f}, "
-              f"acc={losses['train']['accuracy']:.3f}")
+              f"det={losses['train']['detection_rate']:.1%}")
         print(f"  Val:   E_correct={losses['val']['energy_correct']:.4f}, "
               f"E_wrong={losses['val']['energy_wrong']:.4f}, "
-              f"acc={losses['val']['accuracy']:.3f}")
+              f"det={losses['val']['detection_rate']:.1%}")
 
         if wandb_log:
             wandb.log({
@@ -365,10 +405,10 @@ while iter_num < max_iters:
                 'val/loss': losses['val']['loss'],
                 'train/energy_correct': losses['train']['energy_correct'],
                 'train/energy_wrong': losses['train']['energy_wrong'],
-                'train/accuracy': losses['train']['accuracy'],
+                'train/detection_rate': losses['train']['detection_rate'],
                 'val/energy_correct': losses['val']['energy_correct'],
                 'val/energy_wrong': losses['val']['energy_wrong'],
-                'val/accuracy': losses['val']['accuracy'],
+                'val/detection_rate': losses['val']['detection_rate'],
                 'lr': lr,
             })
 
@@ -397,13 +437,13 @@ while iter_num < max_iters:
         if eval_only:
             break
 
-    # Forward + backward
-    contexts, targets, context_lens, target_lens, labels = get_batch('train')
+    # Forward + backward (paired loss)
+    contexts, correct_targets, wrong_targets, context_lens, correct_lens, wrong_lens = get_batch('train')
 
     with ctx:
-        loss, metrics = compute_contrastive_loss(
-            model, contexts, targets, labels,
-            context_lens, target_lens
+        loss, metrics = compute_paired_loss(
+            model, contexts, correct_targets, wrong_targets,
+            context_lens, correct_lens, wrong_lens
         )
 
     scaler.scale(loss).backward()
@@ -423,7 +463,7 @@ while iter_num < max_iters:
         avg_loss = running_loss / log_interval
         print(f"iter {iter_num}: loss {avg_loss:.4f}, "
               f"E_c={metrics['energy_correct']:.3f}, E_w={metrics['energy_wrong']:.3f}, "
-              f"acc={metrics['accuracy']:.2f}, lr={lr:.2e}, time={dt*1000:.0f}ms")
+              f"det={metrics['detection_rate']:.1%}, lr={lr:.2e}, time={dt*1000:.0f}ms")
         running_loss = 0.0
         t0 = time.time()
 

@@ -174,10 +174,12 @@ class OuroborosModel(nn.Module):
         self.ln_f = nn.LayerNorm(config.n_embd)
 
         # Energy head: produces scalar "energy" per sequence
+        # Sigmoid bounds output to [0, 1] for stable MSE training
         self.energy_head = nn.Sequential(
             nn.Linear(config.n_embd, config.n_embd // 2),
             nn.GELU(),
-            nn.Linear(config.n_embd // 2, 1)
+            nn.Linear(config.n_embd // 2, 1),
+            nn.Sigmoid()
         )
 
         # Optional: LM head for generation/diffusion

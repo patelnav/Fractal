@@ -121,8 +121,11 @@ def create_math_contrastive_pairs(
     Create contrastive pairs for math problem.
 
     Returns: List of (question, solution, is_correct) tuples
+
+    Uses MORE OBVIOUS perturbations for clearer training signal.
     """
     import random
+    import re
 
     steps, answer = parse_gsm8k_solution(correct_solution)
 
@@ -131,55 +134,71 @@ def create_math_contrastive_pairs(
     # Correct pair
     pairs.append((question, correct_solution, True))
 
-    # Wrong pairs - perturb the steps
-    for _ in range(num_wrong):
+    # Wrong pairs - use OBVIOUS perturbations
+    perturbations = ['wrong_answer_big', 'remove_steps', 'contradictory', 'scramble_numbers']
+
+    for i in range(num_wrong):
+        perturbation = perturbations[i % len(perturbations)]
         wrong_steps = steps.copy()
-        perturbation = random.choice(['swap_numbers', 'wrong_op', 'wrong_answer'])
+        wrong_answer = answer
 
-        if perturbation == 'swap_numbers' and len(wrong_steps) > 0:
-            # Swap digits in a random step
-            idx = random.randint(0, len(wrong_steps) - 1)
-            step = wrong_steps[idx]
-            # Find numbers and swap some digits
-            import re
-            nums = re.findall(r'\d+', step)
-            if nums:
-                num = random.choice(nums)
-                if len(num) > 1:
-                    # Swap two digits
-                    num_list = list(num)
-                    i, j = random.sample(range(len(num_list)), 2)
-                    num_list[i], num_list[j] = num_list[j], num_list[i]
-                    new_num = ''.join(num_list)
-                    step = step.replace(num, new_num, 1)
-                else:
-                    # Change single digit
-                    new_digit = str((int(num) + random.randint(1, 5)) % 10)
-                    step = step.replace(num, new_digit, 1)
-                wrong_steps[idx] = step
-
-        elif perturbation == 'wrong_op' and len(wrong_steps) > 0:
-            # Change an operator
-            idx = random.randint(0, len(wrong_steps) - 1)
-            step = wrong_steps[idx]
-            ops = ['+', '-', '*', '/']
-            for op in ops:
-                if op in step:
-                    new_op = random.choice([o for o in ops if o != op])
-                    step = step.replace(op, new_op, 1)
-                    break
-            wrong_steps[idx] = step
-
-        elif perturbation == 'wrong_answer':
-            # Change the final answer
+        if perturbation == 'wrong_answer_big':
+            # Change answer significantly (multiply or divide by 10, or add 100)
             try:
-                wrong_answer = str(int(float(answer)) + random.randint(-10, 10))
+                ans_val = int(float(answer))
+                wrong_answer = str(random.choice([
+                    ans_val * 10,
+                    ans_val + 100,
+                    ans_val - ans_val // 2 - 50,
+                    ans_val * 2 + 37,
+                    max(1, ans_val // 10),
+                ]))
             except (ValueError, TypeError):
-                wrong_answer = answer + "0"
-            answer = wrong_answer
+                wrong_answer = "999"
+
+        elif perturbation == 'remove_steps' and len(wrong_steps) > 1:
+            # Remove half the steps - creates incomplete reasoning
+            keep_count = max(1, len(wrong_steps) // 2)
+            wrong_steps = wrong_steps[:keep_count]
+            # Also change answer to make it clearly wrong
+            try:
+                ans_val = int(float(answer))
+                wrong_answer = str(ans_val + random.randint(50, 200))
+            except:
+                wrong_answer = "42"
+
+        elif perturbation == 'contradictory':
+            # Add contradictory statement at the end
+            contradictions = [
+                "Wait, that's wrong. The answer is actually 0.",
+                "Actually I made an error, let me say the answer is 1000.",
+                "Hmm, this doesn't make sense. Let me just guess 99.",
+                "I'm confused, so the answer must be 42.",
+            ]
+            wrong_steps.append(random.choice(contradictions))
+            wrong_answer = random.choice(["0", "42", "99", "1000", "999"])
+
+        elif perturbation == 'scramble_numbers':
+            # Replace ALL numbers in steps with random wrong numbers
+            for idx in range(len(wrong_steps)):
+                step = wrong_steps[idx]
+                nums = re.findall(r'\d+', step)
+                for num in nums:
+                    try:
+                        wrong_num = str(int(num) + random.randint(10, 100))
+                        step = step.replace(num, wrong_num, 1)
+                    except:
+                        pass
+                wrong_steps[idx] = step
+            # Change answer too
+            try:
+                ans_val = int(float(answer))
+                wrong_answer = str(ans_val + random.randint(50, 500))
+            except:
+                wrong_answer = "777"
 
         # Reconstruct solution
-        wrong_solution = '\n'.join(wrong_steps) + f"\n#### {answer}"
+        wrong_solution = '\n'.join(wrong_steps) + f"\n#### {wrong_answer}"
         pairs.append((question, wrong_solution, False))
 
     return pairs
@@ -195,6 +214,8 @@ def create_code_contrastive_pairs(
     Create contrastive pairs for code problem.
 
     Returns: List of (prompt, code, is_correct) tuples
+
+    Uses MORE OBVIOUS perturbations for clearer training signal.
     """
     import random
 
@@ -203,56 +224,55 @@ def create_code_contrastive_pairs(
     # Correct pair
     pairs.append((prompt, correct_code, True))
 
-    # Wrong pairs - perturb the code
-    for _ in range(num_wrong):
+    # Wrong pairs - use OBVIOUS perturbations
+    perturbations = ['return_constant', 'empty_body', 'wrong_logic', 'syntax_break']
+
+    for i in range(num_wrong):
+        perturbation = perturbations[i % len(perturbations)]
         wrong_code = correct_code
-        perturbation = random.choice(['syntax_error', 'off_by_one', 'wrong_return', 'wrong_operator'])
 
-        if perturbation == 'syntax_error':
-            # Remove a colon or add extra parenthesis
-            if ':' in wrong_code:
-                # Remove a colon from a random line
-                lines = wrong_code.split('\n')
-                colon_lines = [i for i, l in enumerate(lines) if ':' in l]
-                if colon_lines:
-                    idx = random.choice(colon_lines)
-                    lines[idx] = lines[idx].replace(':', '', 1)
-                    wrong_code = '\n'.join(lines)
+        if perturbation == 'return_constant':
+            # Replace return value with a constant
+            constants = ['None', '0', '[]', '""', 'True', 'False', '42', '-1']
+            lines = wrong_code.split('\n')
+            return_lines = [i for i, l in enumerate(lines) if 'return ' in l]
+            if return_lines:
+                idx = random.choice(return_lines)
+                # Replace entire return statement
+                indent = len(lines[idx]) - len(lines[idx].lstrip())
+                lines[idx] = ' ' * indent + 'return ' + random.choice(constants)
+                wrong_code = '\n'.join(lines)
             else:
-                wrong_code = wrong_code + ')'
+                wrong_code = wrong_code + '\n    return None  # Wrong!'
 
-        elif perturbation == 'off_by_one':
-            # Change range bounds or array indices
-            import re
-            # Find range(n) and change to range(n-1) or range(n+1)
-            matches = list(re.finditer(r'range\((\d+)\)', wrong_code))
-            if matches:
-                m = random.choice(matches)
-                n = int(m.group(1))
-                new_n = n + random.choice([-1, 1])
-                wrong_code = wrong_code[:m.start(1)] + str(new_n) + wrong_code[m.end(1):]
+        elif perturbation == 'empty_body':
+            # Replace function body with pass
+            lines = wrong_code.split('\n')
+            if len(lines) > 1:
+                # Keep first line, replace rest with pass
+                wrong_code = lines[0] + '\n    pass  # TODO: implement this'
+            else:
+                wrong_code = '    pass  # Not implemented'
 
-        elif perturbation == 'wrong_return':
-            # Change what's returned
-            if 'return ' in wrong_code:
-                lines = wrong_code.split('\n')
-                return_lines = [i for i, l in enumerate(lines) if 'return ' in l]
-                if return_lines:
-                    idx = random.choice(return_lines)
-                    # Append some garbage
-                    lines[idx] = lines[idx].rstrip() + ' + 1'
-                    wrong_code = '\n'.join(lines)
+        elif perturbation == 'wrong_logic':
+            # Add obviously wrong logic
+            wrong_additions = [
+                '\n    # BUG: This is wrong\n    result = result * -1',
+                '\n    # ERROR: Inverting result\n    return not result',
+                '\n    # MISTAKE: Returning opposite\n    if result: return False\n    return True',
+                '\n    # WRONG: Always fail\n    raise ValueError("Always fails")',
+            ]
+            wrong_code = wrong_code.rstrip() + random.choice(wrong_additions)
 
-        elif perturbation == 'wrong_operator':
-            # Change == to != or vice versa
-            if '==' in wrong_code:
-                wrong_code = wrong_code.replace('==', '!=', 1)
-            elif '!=' in wrong_code:
-                wrong_code = wrong_code.replace('!=', '==', 1)
-            elif ' and ' in wrong_code:
-                wrong_code = wrong_code.replace(' and ', ' or ', 1)
-            elif ' or ' in wrong_code:
-                wrong_code = wrong_code.replace(' or ', ' and ', 1)
+        elif perturbation == 'syntax_break':
+            # Add syntax errors that are visible
+            syntax_errors = [
+                '\n    !!!SYNTAX ERROR!!!',
+                '\n    if True\n        pass',  # Missing colon
+                '\n    def broken(:\n        pass',  # Invalid syntax
+                '\n    for in range(10): pass',  # Missing variable
+            ]
+            wrong_code = wrong_code.rstrip() + random.choice(syntax_errors)
 
         pairs.append((prompt, wrong_code, False))
 

@@ -33,6 +33,15 @@ class ContrastiveSample:
     domain: str             # "math" or "code"
 
 
+@dataclass
+class ContrastivePair:
+    """A paired sample for contrastive training (same context, correct vs wrong)."""
+    context_ids: List[int]         # Question/prompt tokens (shared)
+    correct_target_ids: List[int]  # Correct solution
+    wrong_target_ids: List[int]    # Wrong solution
+    domain: str                    # "math" or "code"
+
+
 def load_gsm8k() -> Tuple[List[Dict], List[Dict]]:
     """Load GSM8K train and test sets."""
     train_path = DATA_DIR / "gsm8k" / "train.json"
@@ -87,6 +96,46 @@ def generate_math_samples(
     return samples
 
 
+def generate_math_pairs(
+    data: List[Dict],
+    tokenizer: OuroborosTokenizer,
+    max_seq_len: int = 512
+) -> List[ContrastivePair]:
+    """Generate contrastive PAIRS from GSM8K data (same context, correct vs wrong)."""
+    pairs = []
+
+    for item in tqdm(data, desc="Math pairs"):
+        question = item["question"]
+        answer = item["answer"]
+
+        # Get 1 correct and 1 wrong
+        contrastive = create_math_contrastive_pairs(question, answer, num_wrong=1)
+
+        if len(contrastive) < 2:
+            continue
+
+        _, correct_sol, _ = contrastive[0]  # First is always correct
+        _, wrong_sol, _ = contrastive[1]    # Second is wrong
+
+        # Tokenize
+        context_ids = tokenizer.encode(f"Question: {question}\nSolution: ")
+        correct_target_ids = tokenizer.encode(correct_sol)
+        wrong_target_ids = tokenizer.encode(wrong_sol)
+
+        # Skip if too long
+        if len(context_ids) + max(len(correct_target_ids), len(wrong_target_ids)) > max_seq_len:
+            continue
+
+        pairs.append(ContrastivePair(
+            context_ids=context_ids,
+            correct_target_ids=correct_target_ids,
+            wrong_target_ids=wrong_target_ids,
+            domain="math"
+        ))
+
+    return pairs
+
+
 def generate_code_samples(
     data: List[Dict],
     tokenizer: OuroborosTokenizer,
@@ -120,6 +169,47 @@ def generate_code_samples(
             ))
 
     return samples
+
+
+def generate_code_pairs(
+    data: List[Dict],
+    tokenizer: OuroborosTokenizer,
+    max_seq_len: int = 512
+) -> List[ContrastivePair]:
+    """Generate contrastive PAIRS from HumanEval data (same context, correct vs wrong)."""
+    pairs = []
+
+    for item in tqdm(data, desc="Code pairs"):
+        prompt = item["prompt"]
+        solution = item["canonical_solution"]
+        test = item.get("test", "")
+
+        # Get 1 correct and 1 wrong
+        contrastive = create_code_contrastive_pairs(prompt, solution, test, num_wrong=1)
+
+        if len(contrastive) < 2:
+            continue
+
+        _, correct_code, _ = contrastive[0]  # First is always correct
+        _, wrong_code, _ = contrastive[1]    # Second is wrong
+
+        # Tokenize
+        context_ids = tokenizer.encode(prompt)
+        correct_target_ids = tokenizer.encode(correct_code)
+        wrong_target_ids = tokenizer.encode(wrong_code)
+
+        # Skip if too long
+        if len(context_ids) + max(len(correct_target_ids), len(wrong_target_ids)) > max_seq_len:
+            continue
+
+        pairs.append(ContrastivePair(
+            context_ids=context_ids,
+            correct_target_ids=correct_target_ids,
+            wrong_target_ids=wrong_target_ids,
+            domain="code"
+        ))
+
+    return pairs
 
 
 def samples_to_arrays(
@@ -159,6 +249,48 @@ def samples_to_arrays(
     }
 
 
+def pairs_to_arrays(
+    pairs: List[ContrastivePair],
+    max_context_len: int = 256,
+    max_target_len: int = 256,
+    pad_id: int = 0
+) -> Dict[str, np.ndarray]:
+    """Convert pairs to padded numpy arrays for paired training."""
+    n = len(pairs)
+
+    # Each pair has same context, but correct and wrong targets
+    contexts = np.full((n, max_context_len), pad_id, dtype=np.uint16)
+    correct_targets = np.full((n, max_target_len), pad_id, dtype=np.uint16)
+    wrong_targets = np.full((n, max_target_len), pad_id, dtype=np.uint16)
+    context_lens = np.zeros(n, dtype=np.uint16)
+    correct_target_lens = np.zeros(n, dtype=np.uint16)
+    wrong_target_lens = np.zeros(n, dtype=np.uint16)
+    domains = np.zeros(n, dtype=np.uint8)  # 0 = math, 1 = code
+
+    for i, pair in enumerate(pairs):
+        ctx_len = min(len(pair.context_ids), max_context_len)
+        correct_len = min(len(pair.correct_target_ids), max_target_len)
+        wrong_len = min(len(pair.wrong_target_ids), max_target_len)
+
+        contexts[i, :ctx_len] = pair.context_ids[:ctx_len]
+        correct_targets[i, :correct_len] = pair.correct_target_ids[:correct_len]
+        wrong_targets[i, :wrong_len] = pair.wrong_target_ids[:wrong_len]
+        context_lens[i] = ctx_len
+        correct_target_lens[i] = correct_len
+        wrong_target_lens[i] = wrong_len
+        domains[i] = 0 if pair.domain == "math" else 1
+
+    return {
+        "contexts": contexts,
+        "correct_targets": correct_targets,
+        "wrong_targets": wrong_targets,
+        "context_lens": context_lens,
+        "correct_target_lens": correct_target_lens,
+        "wrong_target_lens": wrong_target_lens,
+        "domains": domains
+    }
+
+
 def balance_samples(samples: List[ContrastiveSample]) -> List[ContrastiveSample]:
     """Balance samples to have equal correct and wrong examples."""
     correct = [s for s in samples if s.is_correct]
@@ -180,7 +312,7 @@ def main():
     np.random.seed(SEED)
 
     print("=" * 60)
-    print("PREPARING OUROBOROS TRAINING DATA (BALANCED)")
+    print("PREPARING OUROBOROS TRAINING DATA (PAIRED FORMAT)")
     print("=" * 60)
 
     # Initialize tokenizer
@@ -196,72 +328,51 @@ def main():
     print(f"  GSM8K test: {len(gsm8k_test)} problems")
     print(f"  HumanEval: {len(humaneval)} problems")
 
-    # Generate contrastive samples with 1:1 ratio
-    print("\nGenerating contrastive samples (1:1 correct:wrong)...")
+    # Generate contrastive PAIRS (same context, correct vs wrong)
+    print("\nGenerating contrastive pairs...")
 
-    # Math samples (train) - 1 wrong per correct for balance
-    math_train_samples = generate_math_samples(
-        gsm8k_train,
-        tokenizer,
-        num_wrong_per_correct=1,  # Changed from 3 to 1 for balance
-        max_seq_len=512
-    )
-    print(f"  Math train (raw): {len(math_train_samples)} samples")
+    # Math pairs (train)
+    math_train_pairs = generate_math_pairs(gsm8k_train, tokenizer, max_seq_len=512)
+    print(f"  Math train: {len(math_train_pairs)} pairs")
 
-    # Math samples (test -> validation)
-    math_val_samples = generate_math_samples(
-        gsm8k_test,
-        tokenizer,
-        num_wrong_per_correct=1,  # Changed from 3 to 1 for balance
-        max_seq_len=512
-    )
-    print(f"  Math val (raw): {len(math_val_samples)} samples")
+    # Math pairs (test -> validation)
+    math_val_pairs = generate_math_pairs(gsm8k_test, tokenizer, max_seq_len=512)
+    print(f"  Math val: {len(math_val_pairs)} pairs")
 
-    # Code samples (split 80/20 for train/val since HumanEval is small)
-    code_samples = generate_code_samples(
-        humaneval,
-        tokenizer,
-        num_wrong_per_correct=1,  # Changed from 3 to 1 for balance
-        max_seq_len=512
-    )
-    random.shuffle(code_samples)
-    split_idx = int(len(code_samples) * 0.8)
-    code_train_samples = code_samples[:split_idx]
-    code_val_samples = code_samples[split_idx:]
-    print(f"  Code train (raw): {len(code_train_samples)} samples")
-    print(f"  Code val (raw): {len(code_val_samples)} samples")
+    # Code pairs (split 80/20 for train/val since HumanEval is small)
+    code_pairs = generate_code_pairs(humaneval, tokenizer, max_seq_len=512)
+    random.shuffle(code_pairs)
+    split_idx = int(len(code_pairs) * 0.8)
+    code_train_pairs = code_pairs[:split_idx]
+    code_val_pairs = code_pairs[split_idx:]
+    print(f"  Code train: {len(code_train_pairs)} pairs")
+    print(f"  Code val: {len(code_val_pairs)} pairs")
 
-    # Combine samples
-    train_samples = math_train_samples + code_train_samples
-    val_samples = math_val_samples + code_val_samples
+    # Combine pairs
+    train_pairs = math_train_pairs + code_train_pairs
+    val_pairs = math_val_pairs + code_val_pairs
 
-    # Balance the samples (equal correct/wrong)
-    train_samples = balance_samples(train_samples)
-    val_samples = balance_samples(val_samples)
+    random.shuffle(train_pairs)
+    random.shuffle(val_pairs)
 
-    random.shuffle(train_samples)
-    random.shuffle(val_samples)
+    print(f"\nTotal train: {len(train_pairs)} pairs")
+    print(f"Total val: {len(val_pairs)} pairs")
 
-    print(f"\nTotal train: {len(train_samples)} samples")
-    print(f"Total val: {len(val_samples)} samples")
+    # Check domain balance
+    train_math = sum(1 for p in train_pairs if p.domain == "math")
+    val_math = sum(1 for p in val_pairs if p.domain == "math")
 
-    # Check balance
-    train_correct = sum(1 for s in train_samples if s.is_correct)
-    train_math = sum(1 for s in train_samples if s.domain == "math")
-    val_correct = sum(1 for s in val_samples if s.is_correct)
-    val_math = sum(1 for s in val_samples if s.domain == "math")
-
-    print(f"\nTrain balance:")
-    print(f"  Correct: {train_correct} ({100*train_correct/len(train_samples):.1f}%)")
-    print(f"  Math: {train_math} ({100*train_math/len(train_samples):.1f}%)")
-    print(f"\nVal balance:")
-    print(f"  Correct: {val_correct} ({100*val_correct/len(val_samples):.1f}%)")
-    print(f"  Math: {val_math} ({100*val_math/len(val_samples):.1f}%)")
+    print(f"\nTrain domain:")
+    print(f"  Math: {train_math} ({100*train_math/len(train_pairs):.1f}%)")
+    print(f"  Code: {len(train_pairs) - train_math} ({100*(len(train_pairs)-train_math)/len(train_pairs):.1f}%)")
+    print(f"\nVal domain:")
+    print(f"  Math: {val_math} ({100*val_math/len(val_pairs):.1f}%)")
+    print(f"  Code: {len(val_pairs) - val_math} ({100*(len(val_pairs)-val_math)/len(val_pairs):.1f}%)")
 
     # Convert to arrays
     print("\nConverting to arrays...")
-    train_arrays = samples_to_arrays(train_samples)
-    val_arrays = samples_to_arrays(val_samples)
+    train_arrays = pairs_to_arrays(train_pairs)
+    val_arrays = pairs_to_arrays(val_pairs)
 
     # Save
     out_dir = DATA_DIR / "processed"
@@ -269,49 +380,22 @@ def main():
 
     print(f"\nSaving to {out_dir}...")
 
-    # Save as .npz for easy loading
-    np.savez(
-        out_dir / "train.npz",
-        **train_arrays
-    )
-    np.savez(
-        out_dir / "val.npz",
-        **val_arrays
-    )
-
-    # Also save as .bin for nanoGPT compatibility (just contexts+targets concatenated)
-    # This is simpler - just a flat array of token ids
-    train_concat = []
-    for i in range(len(train_samples)):
-        ctx_len = train_arrays["context_lens"][i]
-        tgt_len = train_arrays["target_lens"][i]
-        train_concat.extend(train_arrays["contexts"][i, :ctx_len].tolist())
-        train_concat.extend(train_arrays["targets"][i, :tgt_len].tolist())
-
-    val_concat = []
-    for i in range(len(val_samples)):
-        ctx_len = val_arrays["context_lens"][i]
-        tgt_len = val_arrays["target_lens"][i]
-        val_concat.extend(val_arrays["contexts"][i, :ctx_len].tolist())
-        val_concat.extend(val_arrays["targets"][i, :tgt_len].tolist())
-
-    np.array(train_concat, dtype=np.uint16).tofile(out_dir / "train.bin")
-    np.array(val_concat, dtype=np.uint16).tofile(out_dir / "val.bin")
+    # Save as .npz for easy loading (paired format)
+    np.savez(out_dir / "train.npz", **train_arrays)
+    np.savez(out_dir / "val.npz", **val_arrays)
 
     print(f"  train.npz: {(out_dir / 'train.npz').stat().st_size / 1024 / 1024:.1f} MB")
     print(f"  val.npz: {(out_dir / 'val.npz').stat().st_size / 1024 / 1024:.1f} MB")
-    print(f"  train.bin: {(out_dir / 'train.bin').stat().st_size / 1024 / 1024:.1f} MB ({len(train_concat):,} tokens)")
-    print(f"  val.bin: {(out_dir / 'val.bin').stat().st_size / 1024 / 1024:.1f} MB ({len(val_concat):,} tokens)")
 
     # Save metadata
     meta = {
         "vocab_size": tokenizer.vocab_size,
-        "num_train_samples": len(train_samples),
-        "num_val_samples": len(val_samples),
+        "num_train_pairs": len(train_pairs),
+        "num_val_pairs": len(val_pairs),
         "max_context_len": 256,
         "max_target_len": 256,
-        "train_correct_ratio": train_correct / len(train_samples),
-        "train_math_ratio": train_math / len(train_samples),
+        "train_math_ratio": train_math / len(train_pairs),
+        "format": "paired",  # Indicates paired format for training
     }
     with open(out_dir / "meta.json", "w") as f:
         json.dump(meta, f, indent=2)
@@ -320,15 +404,17 @@ def main():
     print("DATA PREPARATION COMPLETE")
     print("=" * 60)
 
-    # Show examples
-    print("\nExample samples:")
-    for i in range(min(3, len(train_samples))):
-        s = train_samples[i]
-        ctx = tokenizer.decode(s.context_ids[:50])
-        tgt = tokenizer.decode(s.target_ids[:50])
-        print(f"\n[{s.domain.upper()}] {'CORRECT' if s.is_correct else 'WRONG'}")
+    # Show example pairs
+    print("\nExample pairs:")
+    for i in range(min(3, len(train_pairs))):
+        p = train_pairs[i]
+        ctx = tokenizer.decode(p.context_ids[:60])
+        correct = tokenizer.decode(p.correct_target_ids[:50])
+        wrong = tokenizer.decode(p.wrong_target_ids[:50])
+        print(f"\n[{p.domain.upper()}] Pair {i}")
         print(f"  Context: {ctx}...")
-        print(f"  Target: {tgt}...")
+        print(f"  Correct: {correct}...")
+        print(f"  Wrong: {wrong}...")
 
 
 if __name__ == "__main__":
