@@ -49,6 +49,6 @@ The hypothesis is **viable**. Shared weights can learn multi-level discrete diff
 - `fractal_output.txt` - Complete training log
 - `RESULTS.md` - Summary of results
 
-## Code Reference
+## Code
 
-See `fractal_diffusion.py` in repository root.
+- `fractal_diffusion.py` - Complete implementation
