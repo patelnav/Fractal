@@ -31,3 +31,10 @@ nanoGPT/
 
 # Temporary files
 /tmp/
+.lambda_api_key
+.lambda_instance_id
+.env
+
+# Cache
+cache/
+results/
