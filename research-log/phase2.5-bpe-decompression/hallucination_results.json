@@ -1,0 +1,31 @@
+{
+  "energy": {
+    "correct_energy_mean": 1656.4019041503905,
+    "correct_energy_std": 967.6074973027838,
+    "wrong_energy_mean": 1659.8244082519534,
+    "wrong_energy_std": 970.0568405317457,
+    "energy_gap_mean": 3.4225041015624154,
+    "energy_gap_std": 13.403114785811836,
+    "detection_rate": 60.0,
+    "num_samples": 100
+  },
+  "diversity": {
+    "real_diversity_mean": 0.002,
+    "real_diversity_std": 0.019899748742132396,
+    "fake_diversity_mean": 0.02723280423280423,
+    "fake_diversity_std": 0.042272404902386956,
+    "detection_rate": 32.0,
+    "num_samples": 100,
+    "num_generations": 10
+  },
+  "cross_token": {
+    "correct_energy_mean": 2167.025546142578,
+    "correct_energy_std": 915.6380246523152,
+    "wrong_energy_mean": 2128.334975390625,
+    "wrong_energy_std": 845.4229891643694,
+    "energy_gap_mean": -38.69057075195315,
+    "energy_gap_std": 1194.512542805097,
+    "detection_rate": 51.0,
+    "num_pairs": 100
+  }
+}
