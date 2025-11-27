@@ -3,45 +3,55 @@
 **Objective:** Quantify the performance impact of the **Adversarial Hardening (Phase 9)** on the unseen **GSM8K Test Set**.
 
 **Context:**
-Initial attempts (Phase 10.0) failed due to:
-1.  **Generator Failure:** Gemma-3-1B-IT produced repetitive garbage loops and leaked chat template tags when manually prompted.
-2.  **Verifier Crash:** Ouroboros (trained on 512 max len) crashed on inputs > 512 tokens due to RoPE shape mismatch.
-3.  **Baseline Collapse:** Baseline accuracy was ~4-12% (expected ~30%), indicating extraction/generation pipeline breakage.
+Initial attempts (Phase 10.0) failed due to generator formatting issues and verifier shape mismatches. We are adopting a strict, gated testing protocol to prevent wasted compute.
 
 ---
 
-## The Revised Plan (Phase 10.1)
+## The Gated Execution Plan (Phase 10.1)
 
-We will fix the pipeline to ensure stable generation and valid verification.
+We will proceed in three distinct stages. **Do not proceed to the next stage unless the current stage passes.**
 
-### 1. Fix Generation & Extraction
-*   **Generator:** Revert to `tokenizer.apply_chat_template(..., tokenize=True)` which handles special tokens correctly.
-*   **Prompting:** Ensure `add_generation_prompt=True` is used so the model knows it's the assistant's turn.
-*   **Extraction:** Improve regex to handle `#### \n Answer` or `####` at the very end of string.
+### Stage 1: Generator & Pipeline Qualification
+**Goal:** Ensure Gemma-1B generates valid, parseable answers and the extraction logic works.
+*   **Action:** Run `test_generator.py` on 20 test problems.
+*   **Checks:**
+    1.  **Format:** Output must contain `#### [Answer]`.
+    2.  **Cleanliness:** No leaked chat tags (`<start_of_turn>`, `user`, `model`) or repetition loops.
+    3.  **Baseline Accuracy:** Must be > 25% on this small sample.
+*   **Failure Condition:** If accuracy < 25% or format is broken, **STOP**. Fix `generator.py` or `utils.py`.
 
-### 2. Strict Constraints
-*   **Length Limit:** Enforce `len(context) + len(target) <= 512`.
-    *   Action: Truncate Context (Question) to 256.
-    *   Action: Truncate Target (Answer) to 256.
-    *   Reason: Ouroboros RoPE embeddings are fixed at 512. Extrapolation causes crashes.
+### Stage 2: Verifier Integration Test
+**Goal:** Ensure Ouroboros runs without crashing and produces valid energy scores.
+*   **Action:** Run `run_eval.py` with `LIMIT=32` and `BATCH_SIZE=8`.
+*   **Constraints:**
+    *   Enforce strict length limit: `len(context) + len(target) <= 512` (Truncate inputs to 256/256).
+*   **Checks:**
+    1.  **Stability:** No `RuntimeError: shape invalid` (RoPE errors).
+    2.  **Scoring:** Energy scores are in [0, 1] range and not all identical.
+*   **Failure Condition:** If crashes occur, **STOP**. Fix truncation logic in `run_eval.py`.
 
-### 3. Evaluation Steps
-1.  **Sanity Check (N=32):** Run a small batch to verify Baseline Accuracy is > 25%.
-    *   If Baseline < 25%, **STOP**. Do not verify. Fix Generator.
-2.  **Full Evaluation (N=1319):** Once baseline is healthy, run full test.
-    *   Generate 16 candidates.
-    *   Verify with Hardened Ouroboros.
-    *   Compare Baseline (Pass@1) vs Ouroboros (Verifier).
+### Stage 3: Full Evaluation
+**Goal:** Measure final system performance.
+*   **Action:** Run `run_eval.py` on full 1,319 test set.
+*   **Config:** `N_CANDIDATES=16`, `BATCH_SIZE=8`.
+*   **Success Metrics:**
+    *   **Baseline (Pass@1):** > 30%
+    *   **Ouroboros (Verifier):** > 45% (Hypothesis: Hardening adds +15% over baseline)
 
-### 4. Success Metrics
+---
 
-| Metric | Baseline Target | Ouroboros Target |
-|--------|-----------------|------------------|
-| **Accuracy** | > 30% | > 45% |
+## Implementation Details
 
-## Execution
+### 1. Strict Truncation Strategy
+Since Ouroboros was trained with `max_seq_len=512`, we cannot feed it longer sequences.
+*   **Context (Question):** Truncate to 256 tokens.
+*   **Target (Answer):** Truncate to 256 tokens.
+*   **Total:** 512 tokens max.
 
-Script: `run_eval.py`
-*   Update to use `HuggingFaceGenerator` with corrected template logic.
-*   Implement strict tokenizer-based truncation.
-*   Add `LIMIT` flag for rapid debugging.
+### 2. Generator Prompting
+Revert to standard `apply_chat_template` to fix formatting issues, but monitor output closely in Stage 1.
+
+### 3. Artifacts
+*   `results_stage1_gen.jsonl`: Generator debug outputs.
+*   `results_stage2_ver.jsonl`: Verifier debug outputs.
+*   `results_phase10.jsonl`: Final evaluation.
