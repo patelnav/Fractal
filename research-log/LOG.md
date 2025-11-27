@@ -149,26 +149,63 @@ Implement a **Recurrent / Fractal Architecture**.
 *   Since the ALU is differentiable, we can backpropagate through the *entire* chain (LLM -> ALU -> LLM). This is **End-to-End Differentiable Reasoning**.
 
 **Experiment 12.3: Zero-Shot Digital Restoration**
+
 *   **Setup:** 
+
     *   **Adder:** GRU-gated Recurrent Transformer (Phase 11), Frozen.
+
     *   **Multiplier:** Hard-coded "Shift-and-Add" loop using the Adder.
+
     *   **Restoration:** `Argmax` snapping at every step to prevent analog drift.
+
 *   **Task:** 8-bit $\times$ 8-bit Multiplication (OOD - model never saw multiplication).
+
 *   **Result:**
+
     *   Test Acc: **100.00%** (Perfect Extrapolation).
+
 *   **Conclusion:** **Neural Compositionality is Solved.** We proved that we can build complex algorithms (Multiplication) by composing pre-trained primitives (Adders) without any additional training, *provided* we enforce digital signal restoration between steps. This effectively creates a **Neural CPU**.
+
+
+
+**Experiment 12.5: Exhaustive Diagnostics**
+
+*   **Verification:** Ran 4-bit $\times$ 4-bit exhaustive multiplication (256 cases).
+
+*   **Result:** **100% Pass**. Confirms the zero-shot result wasn't a fluke. The primitive is robust.
+
+
 
 ---
 
-## Phase 13: The Neural RISC-V (Vector 7 Final)
 
-**Objective:** We have the ALU. Now we need the **Instruction Set Architecture (ISA)**.
-Instead of hard-coding "Shift-and-Add", we want the model to *learn* to call the Adder.
 
-**The Vision:**
-A "Neural Controller" (small Transformer) that emits:
-1.  **Opcode:** `ADD`, `SHIFT`, `NO-OP`
-2.  **Operands:** Pointers to memory/registers.
+## Phase 13: The Neural RISC-V (Future Work)
 
-**Hypothesis:**
-If we train this Controller via Reinforcement Learning (or Differentiable Search) to solve Multiplication, it should **re-discover** the Shift-and-Add algorithm by calling our Phase 11 Adder.
+
+
+**Initial Attempt (Phase 13.0):**
+
+We tried to train a Neural Controller to *discover* the Shift-and-Add algorithm using the frozen Adder.
+
+*   **Result:** Failed to converge (Acc ~10%).
+
+*   **Analysis:** The search space (Discrete instructions $\times$ 16 steps) is too large for unguided Gradient Descent. The "Credit Assignment" problem is severe.
+
+
+
+**Roadmap:**
+
+To solve Algorithm Discovery, we need:
+
+1.  **Curriculum Learning:** Teach `SHIFT` first, then `ADD`, then `LOOP`.
+
+2.  **Imitation Learning:** Supervise the controller on traces of the Shift-and-Add algorithm initially.
+
+3.  **RL:** Use PPO instead of Gumbel-Softmax for better exploration.
+
+
+
+**Final Status (Nov 26 2025):**
+
+We have successfully built the **Hardware** of the Neural Computer (Adder, Multiplier, Digital Restoration). The **Software** (Learning Algorithms) remains the next grand challenge.
