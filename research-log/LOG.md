@@ -84,6 +84,28 @@ Result: Confirms the fractal/shared-weight hypothesis and shows a single energy 
 
 ---
 
+## Phase 7-10: Ouroboros System (Reasoning Verification)
+
+**Objective:** Apply the "Contrastive Energy Head" concept to verify Chain-of-Thought reasoning on GSM8K.
+
+**Method:**
+1.  **Phase 7:** Train `OuroborosModel` (BERT-like verifier) on Generator outputs (Gemma-2B). Loss = Contrastive Energy (push down correct, push up incorrect).
+2.  **Phase 8:** Use "System 2" inference (generate 16 candidates -> select lowest energy).
+3.  **Phase 9:** "Adversarial Hardening" - mine hard negatives from the generator to toughen the verifier.
+4.  **Phase 10:** Full system evaluation on GSM8K Test Set.
+
+**Results (Phase 10):**
+*   **Baseline (Gemma-1B):** 52.46% (Pass@1)
+*   **Oracle (Pass@16):** 80.14% (Potential Ceiling)
+*   **Ouroboros (Verifier):** 50.42% (Pass@1)
+
+**Conclusion:**
+The verifier failed to outperform the baseline (-2.04%).
+**Failure Mode:** The verifier learned to assign extremely low energy (high confidence) to "degenerate" artifacts like repetition loops or plausible-looking but mathematically wrong answers. The "hardening" phase was insufficient to close these holes in the energy landscape.
+**Lesson:** Pure energy minimization without structural constraints or rule-based sanity checks is fragile. Future work should incorporate Process Reward Models (PRMs) or explicit rule-based filtering.
+
+---
+
 ## Summary
 
 | Phase | Task | UNK Rate | Detection | Verdict |
@@ -95,5 +117,22 @@ Result: Confirms the fractal/shared-weight hypothesis and shows a single energy 
 | 4 | Fractal engine L0/L1 | 0% | 100% / 99% | PASS (multi-level) |
 | 5 | Dreamer demo (gen) | 0% | N/A | PASS (vertical gen) |
 | 6 | Hybrid manager+fractal | 0% | N/A | PASS (hybrid gen) |
+| 7-10 | GSM8K Reasoning | N/A | 50% (vs 52% base) | FAIL (verifier fragility) |
 
-**Updated hypothesis**: Chen-style implicit energy (∫||score||² dt) fails as a practical hallucination detector for discrete diffusion on lookup-style tasks, but explicit contrastive energy heads + hierarchical fractal structure can achieve near-perfect detection and enable self-verifying generation.
+**Final Verdict:** The "Fractal/Energy" hypothesis works brilliantly for **deterministic decompression** (Phases 3-4) where ground truth is absolute. It struggles significantly in **open-ended reasoning** (Phases 7-10) where the "correctness" manifold is complex and the verifier can be tricked by plausible-sounding hallucinations or artifacts.
+
+---
+
+## Strategic Pivot (2025-11-26): From "Soft" to "Hard" Verification
+
+**Decision:** Abandon Vector 3 (Text/Math Reasoning) and pivot to **Vector 6 (Program Synthesis & Execution)**.
+
+**Rationale:**
+1.  **The Failure of Soft Verification:** In Phase 10, the verifier assigned low energy (high confidence) to confident hallucinations and repetition loops. In the domain of natural language reasoning, "plausible" is too close to "correct" in the embedding space.
+2.  **The Promise of Hard Verification:** We need a domain where correctness is binary and irrefutable. Code execution provides this. A function either passes its tests or it doesn't.
+3.  **Infinite Ground Truth:** Unlike GSM8K (finite dataset), we can generate infinite synthetic coding problems and run the solutions to get perfect `(Prompt, Code, Pass/Fail)` triplets without human labeling.
+
+**New Objective (Phase 11+):** Train an energy-based verifier to predict **Execution Validity**.
+*   **Input:** Problem Spec + Generated Code
+*   **Training Target:** Energy ≈ 0 if Tests Pass, Energy ≈ 1 if Tests Fail.
+*   **Goal:** Use the verifier to reject invalid code *before* execution (or to guide search), solving the "Plausible but Wrong" problem by grounding it in compiler reality.

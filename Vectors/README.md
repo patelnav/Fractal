@@ -119,6 +119,70 @@ Use the fractal energy signals to study datasets and training dynamics, not just
 
 # Vector Scores
 
-**[Click here to see the detailed scoring and evaluation by Gemini CLI Agent](./GEMINI_EVALUATION.md)**
+## Combined Evaluation Summary
+
+| Vector | Gemini | Claude | GPT-5.1 | **Avg** |
+|--------|--------|--------|---------|---------|
+| 1. Flash Flood | 4.75 | 4.00 | 4.10 | **4.28** |
+| 2. Holographic | 2.95 | 3.45 | 3.35 | **3.25** |
+| 3. Ouroboros | 4.75 | 4.70 | 4.25 | **4.57** |
+| 4. Governance | 3.80 | 3.20 | 3.10 | **3.37** |
+| 5. World Models | 3.15 | 3.20 | 2.95 | **3.10** |
+| 6. Program Synth | 4.60 | 4.50 | 4.50 | **4.53** |
+| 7. Hier. Editing | 3.70 | 3.10 | 2.85 | **3.22** |
+| 8. Multi-Modal | 2.65 | 3.05 | 3.45 | **3.05** |
+| 9. Data Curation | 2.80 | 3.45 | 3.60 | **3.28** |
+
+### Detailed Scores by Dimension
+
+| Vector | Evaluator | Demo | Falsify | M2 | Cloud | Baseline | Reuse | **Total** |
+|--------|-----------|------|---------|-----|-------|----------|-------|-----------|
+| **1. Flash Flood** | Gemini | 5 | 5 | 4 | 5 | 5 | 4 | 4.75 |
+| | Claude | 4 | 5 | 4 | 4 | 4 | 2 | 4.00 |
+| | GPT-5.1 | 4 | 4 | 4 | 4 | 4 | 5 | 4.10 |
+| **2. Holographic** | Gemini | 2 | 3 | 3 | 2 | 4 | 5 | 2.95 |
+| | Claude | 3 | 4 | 3 | 2 | 5 | 4 | 3.45 |
+| | GPT-5.1 | 3 | 4 | 3 | 3 | 4 | 3 | 3.35 |
+| **3. Ouroboros** | Gemini | 4 | 5 | 5 | 5 | 5 | 5 | 4.75 |
+| | Claude | 5 | 5 | 4 | 4 | 5 | 5 | 4.70 |
+| | GPT-5.1 | 4 | 4 | 4 | 4 | 5 | 5 | 4.25 |
+| **4. Governance** | Gemini | 3 | 3 | 5 | 5 | 3 | 5 | 3.80 |
+| | Claude | 2 | 4 | 4 | 3 | 3 | 4 | 3.20 |
+| | GPT-5.1 | 3 | 3 | 3 | 3 | 3 | 4 | 3.10 |
+| **5. World Models** | Gemini | 5 | 4 | 2 | 2 | 2 | 2 | 3.15 |
+| | Claude | 4 | 4 | 2 | 2 | 4 | 2 | 3.20 |
+| | GPT-5.1 | 3 | 4 | 2 | 2 | 4 | 2 | 2.95 |
+| **6. Program Synth** | Gemini | 5 | 5 | 4 | 4 | 5 | 4 | 4.60 |
+| | Claude | 5 | 5 | 4 | 4 | 5 | 3 | 4.50 |
+| | GPT-5.1 | 5 | 5 | 4 | 4 | 5 | 3 | 4.50 |
+| **7. Hier. Editing** | Gemini | 4 | 3 | 5 | 5 | 2 | 3 | 3.70 |
+| | Claude | 3 | 3 | 4 | 3 | 2 | 4 | 3.10 |
+| | GPT-5.1 | 3 | 3 | 3 | 3 | 2 | 3 | 2.85 |
+| **8. Multi-Modal** | Gemini | 5 | 2 | 1 | 1 | 4 | 1 | 2.65 |
+| | Claude | 5 | 4 | 1 | 1 | 4 | 1 | 3.05 |
+| | GPT-5.1 | 5 | 4 | 2 | 2 | 4 | 2 | 3.45 |
+| **9. Data Curation** | Gemini | 1 | 2 | 5 | 5 | 1 | 5 | 2.80 |
+| | Claude | 2 | 4 | 5 | 5 | 1 | 5 | 3.45 |
+| | GPT-5.1 | 2 | 4 | 5 | 4 | 3 | 5 | 3.60 |
+
+### Consensus Ranking
+
+1. **Vector 3: Ouroboros Reasoner** (Avg: 4.57) — All evaluators agree this is a top pick
+2. **Vector 6: Program Synthesis** (Avg: 4.53) — Universal agreement on high potential
+3. **Vector 1: Flash Flood Decoder** (Avg: 4.28) — Strong demo potential, some disagreement on reuse
+4. **Vector 4: Governance Engine** (Avg: 3.37) — Middle tier, valuable but niche
+5. **Vector 9: Data Curation** (Avg: 3.28) — Cheap to run but hard to demo
+6. **Vector 2: Holographic Learner** (Avg: 3.25) — Data efficiency is expensive to prove
+7. **Vector 7: Hierarchical Editing** (Avg: 3.22) — Lacks standard benchmarks
+8. **Vector 5: World Models** (Avg: 3.10) — Compute-intensive RL requirements
+9. **Vector 8: Multi-Modal** (Avg: 3.05) — High demo-ability, prohibitive compute
+
+---
+
+## Individual Evaluations
+
+- **[Gemini CLI Agent Evaluation](./GEMINI_EVALUATION.md)**
+- **[Claude (Opus 4) Evaluation](./CLAUDE_EVALUATION.md)**
+- **[GPT-5.1 Evaluation](./GPT-5.1-EVAL.md)**
 
 
