@@ -9,15 +9,13 @@ from torch.utils.data import Dataset, DataLoader
 
 # Configuration
 MODEL_NAME = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
-DATA_FILE = "research-log/phase14-vector6-reboot/data/mbpp_test_labeled.jsonl"
-CRITIC_CHECKPOINT = "research-log/phase14-vector6-reboot/checkpoints_hardening/critic_hardened_e2.pt" # Hardened on hard negatives
+DATA_FILE = "research-log/phase14-vector6-reboot/data/humaneval_labeled.jsonl"
+# Using the ORIGINAL MBPP-trained Critic (Best one)
+CRITIC_CHECKPOINT = "research-log/phase14-vector6-reboot/checkpoints_critic/critic_e3.pt" 
 MAX_LEN = 512
 BATCH_SIZE = 32
 
 class CodeVerifier(nn.Module):
-    """
-    Same architecture as trained critic.
-    """
     def __init__(self, model_name):
         super().__init__()
         self.backbone = AutoModelForCausalLM.from_pretrained(
@@ -44,7 +42,7 @@ class CodeVerifier(nn.Module):
         logits = self.score_head(pooled_output)
         return logits
 
-class TestDataset(Dataset):
+class HumanEvalDataset(Dataset):
     def __init__(self, data, tokenizer, max_len=512):
         self.data = data
         self.tokenizer = tokenizer
@@ -55,7 +53,8 @@ class TestDataset(Dataset):
     
     def __getitem__(self, idx):
         item = self.data[idx]
-        text = f"{item['prompt']}\n\n# Solution:\n{item['code']}"
+        # For HumanEval, prompt + code is the full solution
+        text = f"{item['prompt']}\n{item['code']}"
         enc = self.tokenizer(text, truncation=True, max_length=self.max_len, padding="max_length", return_tensors="pt")
         return {
             "input_ids": enc.input_ids.squeeze(0),
@@ -63,14 +62,13 @@ class TestDataset(Dataset):
             "idx": idx
         }
 
-def evaluate_critic():
+def evaluate_humaneval():
     print("Loading Data...")
     data = []
     with open(DATA_FILE, 'r') as f:
         for line in f:
             data.append(json.loads(line))
             
-    # Group by task_id
     tasks = {}
     for item in data:
         tid = item['task_id']
@@ -80,37 +78,32 @@ def evaluate_critic():
         
     print(f"Loaded {len(data)} samples covering {len(tasks)} tasks.")
     
-    print("Loading Critic...")
+    print("Loading MBPP-Trained Critic...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
     model = CodeVerifier(MODEL_NAME)
-    # Load Weights
     state_dict = torch.load(CRITIC_CHECKPOINT)
     model.load_state_dict(state_dict)
     model.eval()
     
     print("Scoring Samples...")
-    dataset = TestDataset(data, tokenizer, MAX_LEN)
+    dataset = HumanEvalDataset(data, tokenizer, MAX_LEN)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
     
     all_scores = []
-    
     with torch.no_grad():
         for batch in tqdm(loader):
             input_ids = batch["input_ids"].to("cuda")
             mask = batch["attention_mask"].to("cuda")
-            
             logits = model(input_ids, mask)
             scores = torch.sigmoid(logits).float().cpu().numpy().flatten()
             all_scores.extend(scores)
             
-    # Attach scores
     for i, item in enumerate(data):
         item['critic_score'] = float(all_scores[i])
         
-    # Evaluate
     print("Calculating Metrics...")
     
     pass_at_1_baseline = 0
@@ -121,28 +114,22 @@ def evaluate_critic():
     for tid, samples in tasks.items():
         if not samples:
             continue
-            
         total_tasks += 1
         
-        # 1. Oracle (Did ANY pass?)
         any_pass = any(s['status'] == 'passed' for s in samples)
         if any_pass:
             pass_oracle += 1
             
-        # 2. Baseline (Average Pass Rate = Expected Pass@1)
-        # Or just "Random Sample". Let's use Average.
         num_pass = sum(1 for s in samples if s['status'] == 'passed')
         pass_at_1_baseline += (num_pass / len(samples))
         
-        # 3. Critic Selected (Top 1)
-        # Sort by score descending
         samples.sort(key=lambda x: x['critic_score'], reverse=True)
         top_1 = samples[0]
         if top_1['status'] == 'passed':
             pass_at_1_critic += 1
             
     print("="*40)
-    print(f"RESULTS (N={len(tasks)} Test Problems)")
+    print(f"HUMANEVAL RESULTS (N={len(tasks)})")
     print("="*40)
     print(f"Baseline Pass@1 (Random): {pass_at_1_baseline/total_tasks*100:.2f}%")
     print(f"Critic   Pass@1 (Top-1):  {pass_at_1_critic/total_tasks*100:.2f}%")
@@ -150,7 +137,7 @@ def evaluate_critic():
     print("="*40)
     
     delta = (pass_at_1_critic - pass_at_1_baseline) / total_tasks * 100
-    print(f"Improvement: +{delta:.2f}%")
+    print(f"Transfer Improvement: +{delta:.2f}%")
 
 if __name__ == "__main__":
-    evaluate_critic()
+    evaluate_humaneval()

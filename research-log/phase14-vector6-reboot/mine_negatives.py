@@ -9,15 +9,13 @@ from torch.utils.data import Dataset, DataLoader
 
 # Configuration
 MODEL_NAME = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
-DATA_FILE = "research-log/phase14-vector6-reboot/data/mbpp_test_labeled.jsonl"
-CRITIC_CHECKPOINT = "research-log/phase14-vector6-reboot/checkpoints_hardening/critic_hardened_e2.pt" # Hardened on hard negatives
-MAX_LEN = 512
+DATA_FILE = "research-log/phase14-vector6-reboot/data/mbpp_labeled.jsonl" # The training data
+CRITIC_CHECKPOINT = "research-log/phase14-vector6-reboot/checkpoints_critic/critic_e3.pt" # Use best checkpoint
+OUTPUT_FILE = "research-log/phase14-vector6-reboot/data/hard_negatives.jsonl"
 BATCH_SIZE = 32
+MAX_LEN = 512
 
 class CodeVerifier(nn.Module):
-    """
-    Same architecture as trained critic.
-    """
     def __init__(self, model_name):
         super().__init__()
         self.backbone = AutoModelForCausalLM.from_pretrained(
@@ -44,7 +42,7 @@ class CodeVerifier(nn.Module):
         logits = self.score_head(pooled_output)
         return logits
 
-class TestDataset(Dataset):
+class MiningDataset(Dataset):
     def __init__(self, data, tokenizer, max_len=512):
         self.data = data
         self.tokenizer = tokenizer
@@ -63,22 +61,16 @@ class TestDataset(Dataset):
             "idx": idx
         }
 
-def evaluate_critic():
-    print("Loading Data...")
+def mine_hard_negatives():
+    print(f"Loading Data from {DATA_FILE}...")
     data = []
     with open(DATA_FILE, 'r') as f:
         for line in f:
-            data.append(json.loads(line))
+            entry = json.loads(line)
+            if entry['status'] in ['passed', 'failed', 'timeout']:
+                data.append(entry)
             
-    # Group by task_id
-    tasks = {}
-    for item in data:
-        tid = item['task_id']
-        if tid not in tasks:
-            tasks[tid] = []
-        tasks[tid].append(item)
-        
-    print(f"Loaded {len(data)} samples covering {len(tasks)} tasks.")
+    print(f"Loaded {len(data)} samples.")
     
     print("Loading Critic...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
@@ -86,13 +78,12 @@ def evaluate_critic():
         tokenizer.pad_token = tokenizer.eos_token
         
     model = CodeVerifier(MODEL_NAME)
-    # Load Weights
     state_dict = torch.load(CRITIC_CHECKPOINT)
     model.load_state_dict(state_dict)
     model.eval()
     
-    print("Scoring Samples...")
-    dataset = TestDataset(data, tokenizer, MAX_LEN)
+    print("Scoring Training Data...")
+    dataset = MiningDataset(data, tokenizer, MAX_LEN)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
     
     all_scores = []
@@ -101,56 +92,48 @@ def evaluate_critic():
         for batch in tqdm(loader):
             input_ids = batch["input_ids"].to("cuda")
             mask = batch["attention_mask"].to("cuda")
-            
             logits = model(input_ids, mask)
             scores = torch.sigmoid(logits).float().cpu().numpy().flatten()
             all_scores.extend(scores)
             
-    # Attach scores
+    # Analyze
+    hard_negatives = []
+    hard_positives = [] # Positives that got low scores (confusion) 
+    
     for i, item in enumerate(data):
-        item['critic_score'] = float(all_scores[i])
+        score = float(all_scores[i])
+        status = item['status']
         
-    # Evaluate
-    print("Calculating Metrics...")
-    
-    pass_at_1_baseline = 0
-    pass_at_1_critic = 0
-    pass_oracle = 0
-    total_tasks = 0
-    
-    for tid, samples in tasks.items():
-        if not samples:
-            continue
+        # Definition of Hard Negative: Actual=Fail, Predicted=High (Confidently Wrong)
+        if status != 'passed' and score > 0.5:
+            item['mining_type'] = 'hard_negative'
+            item['score'] = score
+            hard_negatives.append(item)
             
-        total_tasks += 1
-        
-        # 1. Oracle (Did ANY pass?)
-        any_pass = any(s['status'] == 'passed' for s in samples)
-        if any_pass:
-            pass_oracle += 1
-            
-        # 2. Baseline (Average Pass Rate = Expected Pass@1)
-        # Or just "Random Sample". Let's use Average.
-        num_pass = sum(1 for s in samples if s['status'] == 'passed')
-        pass_at_1_baseline += (num_pass / len(samples))
-        
-        # 3. Critic Selected (Top 1)
-        # Sort by score descending
-        samples.sort(key=lambda x: x['critic_score'], reverse=True)
-        top_1 = samples[0]
-        if top_1['status'] == 'passed':
-            pass_at_1_critic += 1
-            
+        # Definition of Hard Positive: Actual=Pass, Predicted=Low (Missed Opportunity)
+        if status == 'passed' and score < 0.5:
+            item['mining_type'] = 'hard_positive'
+            item['score'] = score
+            hard_positives.append(item)
+
     print("="*40)
-    print(f"RESULTS (N={len(tasks)} Test Problems)")
+    print("MINING RESULTS")
     print("="*40)
-    print(f"Baseline Pass@1 (Random): {pass_at_1_baseline/total_tasks*100:.2f}%")
-    print(f"Critic   Pass@1 (Top-1):  {pass_at_1_critic/total_tasks*100:.2f}%")
-    print(f"Oracle   Pass@N (Upper):  {pass_oracle/total_tasks*100:.2f}%")
-    print("="*40)
+    print(f"Total Samples: {len(data)}")
+    print(f"Hard Negatives (Fail but Score > 0.5): {len(hard_negatives)}")
+    print(f"Hard Positives (Pass but Score < 0.5): {len(hard_positives)}")
     
-    delta = (pass_at_1_critic - pass_at_1_baseline) / total_tasks * 100
-    print(f"Improvement: +{delta:.2f}%")
+    # Save for inspection/retraining
+    # We want to construct a dataset that emphasizes these.
+    # Strategy: Take ALL Hard Negatives + ALL Hard Positives + Random Sample of Easy cases to prevent forgetting.
+    
+    with open(OUTPUT_FILE, 'w') as f:
+        for item in hard_negatives:
+            f.write(json.dumps(item) + "\n")
+        for item in hard_positives:
+            f.write(json.dumps(item) + "\n")
+            
+    print(f"Saved {len(hard_negatives) + len(hard_positives)} mined samples to {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    evaluate_critic()
+    mine_hard_negatives()

@@ -322,7 +322,15 @@ We have successfully built the **Hardware** of the Neural Computer (Adder, Multi
 
 
 
+
+
+
+
 **Hard Verification Drives Extrapolation.**
+
+
+
+
 
 
 
@@ -330,11 +338,131 @@ Just as "Digital Restoration" stabilized the Neural CPU, "Execution-Based Traini
 
 
 
+
+
+
+
 A small model (1.5B) improved its own performance by ~6% absolute simply by learning to verify itself against Ground Truth execution.
 
 
 
+
+
+
+
 This validates the Fractal/Ouroboros thesis: **Verification is the key to scaling reasoning.**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Follow-up Experiments (Nov 27 2025)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1.  **Hardening (Phase 14.6):** Failed.
+
+
+
+
+
+
+
+    *   Mined 680 "Hard Negatives" (Confidently Wrong) from training set.
+
+
+
+
+
+
+
+    *   Retraining degraded performance (66.9% -> 65.7%).
+
+
+
+
+
+
+
+    *   *Lesson:* Forcing the model to memorize ambiguous/confusing samples hurts the general decision boundary.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+2.  **Transfer Learning (Phase 14.7):** Success.
+
+
+
+
+
+
+
+    *   Applied the **MBPP-trained Critic** to **HumanEval** (Zero-Shot).
+
+
+
+
+
+
+
+    *   **Baseline Pass@1:** 64.62%
+
+
+
+
+
+
+
+    *   **Critic Pass@1:** 68.29% (**+3.67%**)
+
+
+
+
+
+
+
+    *   *Result:* The Soft Verifier learned general code correctness principles, not just MBPP shortcuts.
+
+
+
+
+
+
+
+
 
 
 
