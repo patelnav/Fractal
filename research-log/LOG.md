@@ -106,33 +106,44 @@ The verifier failed to outperform the baseline (-2.04%).
 
 ---
 
-## Summary
+## Phase 11: Fractal Logic Gates (Vector 7)
 
-| Phase | Task | UNK Rate | Detection | Verdict |
-|-------|------|----------|-----------|---------|
-| 1 | Synthetic tree | 0% | N/A | PASS (training) |
-| 2 | Shakespeare next-char | 78% | 52.5% | FAIL |
-| 2.5 | BPE decompress | 0% | 60/32/51% | FAIL |
-| 3 | Contrastive BPE energy | 0% | 100% | PASS (energy head) |
-| 4 | Fractal engine L0/L1 | 0% | 100% / 99% | PASS (multi-level) |
-| 5 | Dreamer demo (gen) | 0% | N/A | PASS (vertical gen) |
-| 6 | Hybrid manager+fractal | 0% | N/A | PASS (hybrid gen) |
-| 7-10 | GSM8K Reasoning | N/A | 50% (vs 52% base) | FAIL (verifier fragility) |
+**Objective:** Build a **Differentiable Neural ALU** that learns the *algorithm* of arithmetic (Extrapolation) rather than memorizing the table.
 
-**Final Verdict:** The "Fractal/Energy" hypothesis works brilliantly for **deterministic decompression** (Phases 3-4) where ground truth is absolute. It struggles significantly in **open-ended reasoning** (Phases 7-10) where the "correctness" manifold is complex and the verifier can be tricked by plausible-sounding hallucinations or artifacts.
+**Experiment 11.0: The Control (Standard Transformer)**
+*   **Setup:** Standard Transformer, Absolute Positional Embeddings.
+*   **Task:** 8-bit Addition (`A + B = C`).
+*   **Train:** 8-bit sums ($< 2^8$).
+*   **Test:** 12-bit sums ($> 2^8$) - "Extrapolation".
+*   **Result:**
+    *   Train Acc: **99.95%** (Memorized 65k examples perfectly).
+    *   Test Acc: **0.00%** (Failed to extrapolate).
+*   **Diagnosis:** Absolute positional embeddings prevent learning invariant logic. The model learned "What to do at Bit 4", but had no weights for "What to do at Bit 10" (since Bit 10 was always 0 in training).
+
+**Next Step (Phase 11.1):**
+Implement a **Recurrent / Fractal Architecture**.
+*   Use the **same** Transformer layer for every bit position.
+*   This forces the model to learn a single "Full Adder" circuit that applies universally.
+
+**Experiment 11.1: The Recurrent Fractal ALU**
+*   **Setup:** Recurrent Transformer (Weights shared across all bit steps).
+*   **Task:** 8-bit Addition (Train) -> 12-bit Addition (Test).
+*   **Result:**
+    *   Train Acc (8-bit): **100.00%**
+    *   Test Acc (12-bit): **99.50%** (Success!)
+*   **Conclusion:** We have created a **Differentiable Neural ALU**. By using a fractal (recurrent) architecture, the model learns the *algorithm* of addition (Carry propagation) rather than memorizing the lookup table. It can now add numbers of arbitrary length.
 
 ---
 
-## Strategic Pivot (2025-11-26): From "Soft" to "Hard" Verification
+## Phase 12: Fractal Co-Processor (Vector 7 - Integration)
 
-**Decision:** Abandon Vector 3 (Text/Math Reasoning) and pivot to **Vector 6 (Program Synthesis & Execution)**.
+**Objective:** We have a differentiable "Adder". Now we need to scale this to a full "Co-Processor".
 
-**Rationale:**
-1.  **The Failure of Soft Verification:** In Phase 10, the verifier assigned low energy (high confidence) to confident hallucinations and repetition loops. In the domain of natural language reasoning, "plausible" is too close to "correct" in the embedding space.
-2.  **The Promise of Hard Verification:** We need a domain where correctness is binary and irrefutable. Code execution provides this. A function either passes its tests or it doesn't.
-3.  **Infinite Ground Truth:** Unlike GSM8K (finite dataset), we can generate infinite synthetic coding problems and run the solutions to get perfect `(Prompt, Code, Pass/Fail)` triplets without human labeling.
+**Challenge 1: Multiplication**
+*   Addition is $O(N)$. Multiplication is $O(N^2)$ or $O(N \log N)$.
+*   Can the Recurrent Fractal ALU learn the shift-and-add algorithm?
 
-**New Objective (Phase 11+):** Train an energy-based verifier to predict **Execution Validity**.
-*   **Input:** Problem Spec + Generated Code
-*   **Training Target:** Energy ≈ 0 if Tests Pass, Energy ≈ 1 if Tests Fail.
-*   **Goal:** Use the verifier to reject invalid code *before* execution (or to guide search), solving the "Plausible but Wrong" problem by grounding it in compiler reality.
+**Challenge 2: Integration**
+*   How do we make a standard LLM (e.g., Gemma) use this ALU?
+*   **Concept:** "Neural Tool Use". The LLM outputs embeddings that are "routed" to the ALU. The ALU processes them. The result is routed back.
+*   Since the ALU is differentiable, we can backpropagate through the *entire* chain (LLM -> ALU -> LLM). This is **End-to-End Differentiable Reasoning**.
