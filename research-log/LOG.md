@@ -208,4 +208,134 @@ To solve Algorithm Discovery, we need:
 
 **Final Status (Nov 26 2025):**
 
+
+
 We have successfully built the **Hardware** of the Neural Computer (Adder, Multiplier, Digital Restoration). The **Software** (Learning Algorithms) remains the next grand challenge.
+
+
+
+
+
+
+
+---
+
+
+
+
+
+
+
+## Phase 14: Vector 6 Reboot (Verified Code Generation)
+
+
+
+
+
+
+
+**Objective:** Apply the "Hard Verification" insight from the Neural CPU (Phase 12) to Real-World Code Generation (MBPP).
+
+
+
+**Hypothesis:** Training a Soft Critic on "Hard" execution results (Pass/Fail) will allow it to generalize and improve code generation on unseen problems via Rejection Sampling.
+
+
+
+
+
+
+
+**Execution:**
+
+
+
+1.  **Generator:** `Qwen2.5-Coder-1.5B-Instruct` (vLLM).
+
+
+
+2.  **Data:** Generated 8,150 solutions for MBPP Train.
+
+
+
+3.  **Labeling:** Executed all solutions against unit tests (Hard Verification). Pass Rate: 63.19%.
+
+
+
+4.  **Training:** Trained a Critic (Qwen-1.5B initialized) on `(Prompt, Code) -> Pass/Fail`.
+
+
+
+    *   Epoch 3 Val Accuracy: **88.83%**.
+
+
+
+5.  **Evaluation (Extrapolation):**
+
+
+
+    *   Generated 50 samples per problem for MBPP Test (Held-out).
+
+
+
+    *   Ranked samples using the trained Critic.
+
+
+
+
+
+
+
+**Results:**
+
+
+
+| Metric | Value |
+
+
+
+|:-------|:------|
+
+
+
+| **Baseline Pass@1** (Random) | 60.94% |
+
+
+
+| **Critic Pass@1** (Top-1) | **66.93%** |
+
+
+
+| **Oracle Pass@N** (Upper Bound) | 90.27% |
+
+
+
+| **Improvement** | **+5.98%** |
+
+
+
+
+
+
+
+**Conclusion:**
+
+
+
+**Hard Verification Drives Extrapolation.**
+
+
+
+Just as "Digital Restoration" stabilized the Neural CPU, "Execution-Based Training" stabilized the Code Generator.
+
+
+
+A small model (1.5B) improved its own performance by ~6% absolute simply by learning to verify itself against Ground Truth execution.
+
+
+
+This validates the Fractal/Ouroboros thesis: **Verification is the key to scaling reasoning.**
+
+
+
+
