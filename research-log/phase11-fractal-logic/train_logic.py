@@ -81,8 +81,8 @@ def train():
             a, b, c = a.to(DEVICE), b.to(DEVICE), c.to(DEVICE)
             
             optimizer.zero_grad()
-            logits = model(a, b) # [Batch, SeqLen, 2]
-            
+            logits, _ = model(a, b) # [Batch, SeqLen, 2], discard soft_bits
+
             loss = criterion(logits.view(-1, 2), c.view(-1))
             loss.backward()
             optimizer.step()
@@ -105,7 +105,7 @@ def train():
             for a, b, c in test_loader:
                 a, b, c = a.to(DEVICE), b.to(DEVICE), c.to(DEVICE)
                 
-                logits = model(a, b)
+                logits, _ = model(a, b)
                 preds = torch.argmax(logits, dim=-1)
                 
                 row_matches = (preds == c).all(dim=1)
