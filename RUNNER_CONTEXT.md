@@ -1,6 +1,54 @@
-# Fractal Project: Lambda Test Runner Guide
+# Fractal Project: Session Context & Lambda Runner Guide
 
-This document provides context for running ML experiments on Lambda GPU instances. Read this first when resuming work.
+This document provides context for resuming work across sessions. **Read this first when starting a new thread.**
+
+---
+
+## Current Phase
+
+| Field | Value |
+|-------|-------|
+| **Active Phase** | `phase14-vector6-reboot` |
+| **Phase Goal** | Best-of-N code selection with learned critic |
+| **Status** | COMPLETE |
+
+---
+
+## Phase 14 Final Results
+
+| Step | Status | Output |
+|------|--------|--------|
+| 1. Generate MBPP Train | COMPLETE | 8,150 samples in 90s (vLLM) |
+| 2. Execute/Label Train | COMPLETE | 63.19% pass rate (5,150/8,150) |
+| 3. Train Critic | COMPLETE | Val Acc = 88.83% (exceeds 80% target) |
+| 4. Generate MBPP Test | COMPLETE | 12,850 samples (257 problems x 50) |
+| 5. Execute/Label Test | COMPLETE | 60.94% pass rate (7,831/12,850) |
+| 6. Critic Ranking | **COMPLETE** | **+5.98% improvement** |
+
+### Key Metrics
+```
+Baseline Pass@1 (Random): 60.94%
+Critic   Pass@1 (Top-1):  66.93%
+Oracle   Pass@N (Upper):  90.27%
+Improvement: +5.98% absolute (~10% relative)
+```
+
+### Phase 14 Files on Lambda
+```
+~/Fractal/research-log/phase14-vector6-reboot/
+├── generate_mbpp.py          # vLLM generation (train)
+├── generate_mbpp_test.py     # vLLM generation (test)
+├── execute_mbpp.py           # Hard Verifier (train)
+├── execute_mbpp_test.py      # Hard Verifier (test)
+├── train_critic.py           # Soft Verifier training
+├── test_critic_ranking.py    # Best-of-N evaluation
+├── data/
+│   ├── mbpp_generations.jsonl     # 8,150 train samples
+│   ├── mbpp_labeled.jsonl         # Train with pass/fail labels
+│   ├── mbpp_test_generations.jsonl # 12,850 test samples
+│   └── mbpp_test_labeled.jsonl    # Test with pass/fail labels
+└── checkpoints_critic/            # critic_e1.pt, critic_e2.pt, etc.
+```
 
 ---
 
@@ -37,7 +85,7 @@ python lambda_helper.py terminate
 
 ```bash
 # Sync a specific phase directory
-python lambda_helper.py sync research-log/phase14-vector6-reboot
+python lambda_helper.py sync research-log/PHASE_DIR
 ```
 
 ### 3. Run Scripts on Lambda
@@ -67,26 +115,27 @@ ssh lambda "nvidia-smi"
 
 ---
 
-## Key Context Files to Read
-
-Before running any phase, read these files for context:
+## Key Context Files
 
 | File | Purpose |
 |------|---------|
-| `research-log/PHASE_DIR/RUN_PHASE*.md` | Success criteria and steps |
-| `research-log/PHASE_DIR/README.md` | Technical details |
+| `RUNNER_CONTEXT.md` | This file - session context & Lambda guide |
 | `research-log/LOG.md` | Historical results and learnings |
+| `research-log/PHASE_DIR/README.md` | Phase-specific technical details |
+| `research-log/PHASE_DIR/RUN_PHASE*.md` | Success criteria and steps |
+| `CLAUDE.md` | Project instructions for Claude |
 
 ---
 
 ## Running a New Experiment: Checklist
 
-1. **Read the plan** - Check `RUN_PHASE*.md` for success criteria
-2. **Sync code** - `python lambda_helper.py sync research-log/PHASE_DIR`
-3. **Run script with logging** - Always tee output to `/tmp/`
-4. **Monitor progress** - `tail -f /tmp/LOGFILE.log`
-5. **Check results** - Grep for key metrics (e.g., `grep "Val Acc" /tmp/*.log`)
-6. **Update status** - Edit this file with results
+1. **Read this file** - Check current phase status
+2. **Read the plan** - Check `RUN_PHASE*.md` for success criteria
+3. **Sync code** - `python lambda_helper.py sync research-log/PHASE_DIR`
+4. **Run script with logging** - Always tee output to `/tmp/`
+5. **Monitor progress** - `tail -f /tmp/LOGFILE.log`
+6. **Check results** - Grep for key metrics
+7. **Update this file** - Record results in Current Phase section
 
 ---
 
@@ -133,37 +182,7 @@ ssh lambda "source ~/.local/bin/env && cd ~/Fractal && \
 
 ---
 
-## Phase 14 Current Status
-
-| Step | Status | Output |
-|------|--------|--------|
-| 1. Generate MBPP | COMPLETE | 8,150 samples in 90s (vLLM) |
-| 2. Execute/Label | COMPLETE | 63.19% pass rate (5,150/8,150) |
-| 3. Train Critic | **COMPLETE** | Val Acc = 88.83% (exceeds 80% target) |
-
-### Phase 14 Files on Lambda
-
-```
-~/Fractal/research-log/phase14-vector6-reboot/
-├── generate_mbpp.py      # vLLM-based generation (Qwen2.5-Coder-1.5B)
-├── execute_mbpp.py       # Hard Verifier (runs tests, labels pass/fail)
-├── train_critic.py       # Soft Verifier (Qwen + classification head)
-├── data/
-│   ├── mbpp_generations.jsonl  # 8,150 samples
-│   └── mbpp_labeled.jsonl      # Same with status labels
-└── checkpoints_critic/         # Model checkpoints (critic_e1.pt, etc.)
-```
-
-### Next Steps (Phase 14.5)
-
-1. Generate test set samples (MBPP test split)
-2. Score all samples with trained critic
-3. Select highest-scoring sample per problem
-4. Measure Pass@1 improvement vs random selection
-
----
-
-## Architecture Summary
+## Architecture Summary (Phase 14)
 
 ```
 Generator (Qwen2.5-Coder-1.5B-Instruct)
@@ -176,9 +195,11 @@ Labeled data (passed/failed)
     ↓
 Soft Verifier Training (learns to predict pass/fail)
     ↓
-Trained Critic Model
+Trained Critic Model (88.83% val acc)
     ↓
 Best-of-N Selection (rank by critic score, pick highest)
+    ↓
+Result: 60.94% → 66.93% Pass@1 (+5.98%)
 ```
 
 ---
@@ -187,3 +208,12 @@ Best-of-N Selection (rank by critic score, pick highest)
 
 - A100 SXM4 80GB: ~$1.29/hr
 - Always terminate when done: `python lambda_helper.py terminate`
+
+---
+
+## Next Steps / Future Work
+
+- [ ] Scale to larger models (7B, 14B)
+- [ ] Try iterative refinement with critic feedback
+- [ ] Explore Best-of-N with higher N
+- [ ] Test on other benchmarks (HumanEval, APPS)

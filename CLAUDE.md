@@ -124,3 +124,4 @@ energy_wrong = energy_head(embed_pair(condition, wrong))     # → 1
 - Reproducibility: set `random.seed()` and `torch.manual_seed()`
 - can we add a clause whenever we are running any code or script or process, ALWAYS TEE IT TO A FILE. I do not want you tail/head/grep output without dumping it to a file first. because nothing is worse than re-running a long process because you didn't log the output
 - remember to use uv and a requirements.txt file
+- Remember this instruction (of telling me where to tail a running script)
