@@ -8,13 +8,49 @@ This document provides context for resuming work across sessions. **Read this fi
 
 | Field | Value |
 |-------|-------|
-| **Active Phase** | `phase14-vector6-reboot` |
-| **Phase Goal** | Best-of-N code selection with learned critic |
-| **Status** | COMPLETE |
+| **Active Phase** | `phase15-rl` |
+| **Phase Goal** | GRPO + Critic "Grand Unification" |
+| **Status** | **COMPLETE** |
 
 ---
 
-## Phase 14 Final Results
+## Phase 15 Final Results: GRPO + Critic
+
+| Model | MBPP Pass@1 | Delta vs Baseline |
+|-------|-------------|-------------------|
+| **Baseline** (Qwen 1.5B greedy) | 58.37% | - |
+| **GRPO e5** (greedy) | 60.70% | +2.33% |
+| **GRPO + Critic** (Best-of-50) | **64.98%** | **+6.61%** |
+| Oracle Upper Bound | 90.66% | +32.29% |
+
+### Key Achievements
+- ~20% of oracle gap recovered via Critic selection
+- Critic validation accuracy: 88.8%
+- GRPO training: 5 epochs, GROUP_SIZE=4
+
+### Phase 15 Files
+```
+~/Fractal/research-log/phase15-rl/
+├── train_grpo.py               # GRPO training (RL)
+├── generate_grpo_test.py       # vLLM generation with GRPO model
+├── execute_grpo_test.py        # Label generations
+├── test_grand_unification.py   # Combine GRPO + Critic
+├── checkpoints/
+│   └── grpo_e5.pt              # Best GRPO checkpoint (2.9GB)
+└── data/
+    ├── grpo_test_generations.jsonl  # 12,850 samples
+    └── grpo_test_labeled.jsonl      # With pass/fail labels
+```
+
+### Retrained Critic (Phase 14 checkpoint)
+```
+~/Fractal/research-log/phase14-vector6-reboot/checkpoints_critic/
+└── critic_e3.pt                # 89.34% val acc (2.9GB)
+```
+
+---
+
+## Phase 14 Results (Best-of-N Baseline)
 
 | Step | Status | Output |
 |------|--------|--------|
@@ -49,6 +85,35 @@ Improvement: +5.98% absolute (~10% relative)
 │   └── mbpp_test_labeled.jsonl    # Test with pass/fail labels
 └── checkpoints_critic/            # critic_e1.pt, critic_e2.pt, etc.
 ```
+
+---
+
+## CRITICAL RULES
+
+1. **ALWAYS use `uv` for package management** - Never use `pip` directly
+   ```bash
+   # Install uv first (if fresh instance)
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # Then install packages with uv
+   source ~/.local/bin/env && uv pip install torch transformers vllm datasets
+   ```
+
+2. **ALWAYS tell user which file to tail** - After launching any script, explicitly say:
+   ```
+   Monitor with: tail -f /tmp/LOGFILE.log
+   ```
+
+3. **ALWAYS ask before terminating Lambda** - Never auto-terminate. Ask user first.
+
+4. **ALWAYS backup outputs before terminating** - Download checkpoints, logs, data:
+   ```bash
+   # Backup checkpoints
+   scp -r lambda:~/Fractal/research-log/PHASE_DIR/checkpoints/ ./research-log/PHASE_DIR/
+
+   # Backup data
+   scp -r lambda:~/Fractal/research-log/PHASE_DIR/data/ ./research-log/PHASE_DIR/
+   ```
 
 ---
 
