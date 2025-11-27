@@ -1,70 +1,74 @@
 # Vector Evaluation by Gemini CLI Agent
 
-*Date: November 26, 2025*
+*Date: November 27, 2025*
 
-I have analyzed the vectors based on our current architectural constraints (M2 development, Phase 6 codebase) and the "Falsifiable" mandate.
+I have analyzed the vectors based on our updated architectural constraints (Phase 6 codebase, Falsifiable mandate) and the new scoring rubric (Demo-ability weighted heavily at 32%).
 
 ---
 
 ## Score Summary
 
-| Vector | Demo | Falsify | M2 | Cloud | Baseline | Reuse | **Total** |
-|--------|------|---------|-----|-------|----------|-------|-----------|
-| 1. Flash Flood | 5 | 5 | 4 | 5 | 5 | 4 | **4.75** |
-| 2. Holographic | 2 | 3 | 3 | 2 | 4 | 5 | **2.95** |
-| 3. Ouroboros | 4 | 5 | 5 | 5 | 5 | 5 | **4.75** |
-| 4. Governance | 3 | 3 | 5 | 5 | 3 | 5 | **3.80** |
-| 5. World Models | 5 | 4 | 2 | 2 | 2 | 2 | **3.15** |
-| 6. Program Synth | 5 | 5 | 4 | 4 | 5 | 4 | **4.60** |
-| 7. Hier. Editing | 4 | 3 | 5 | 5 | 2 | 3 | **3.70** |
-| 8. Multi-Modal | 5 | 2 | 1 | 1 | 4 | 1 | **2.65** |
-| 9. Data Curation | 1 | 2 | 5 | 5 | 1 | 5 | **2.80** |
+**Weights:** Demo (32%), Falsify (20%), Cloud (15%), Baseline (15%), Reuse (18%)
+
+| Vector | Demo | Falsify | Cloud | Baseline | Reuse | **Total** |
+|--------|------|---------|-------|----------|-------|-----------|
+| 1. Flash Flood | 5 | 5 | 5 | 5 | 4 | **4.82** |
+| 2. Holographic | 2 | 3 | 2 | 4 | 5 | **3.04** |
+| 3. Ouroboros | 2 | 5 | 5 | 5 | 5 | **4.04** |
+| 4. Governance | 2 | 3 | 5 | 3 | 5 | **3.34** |
+| 5. World Models | 5 | 4 | 2 | 2 | 2 | **3.36** |
+| 6. Program Synth | 5 | 5 | 5 | 5 | 4 | **4.82** |
+| 7. Hier. Editing | 4 | 3 | 5 | 2 | 3 | **3.47** |
+| 8. Multi-Modal | 5 | 2 | 1 | 4 | 1 | **2.93** |
+| 9. Data Curation | 1 | 2 | 5 | 1 | 5 | **2.52** |
 
 ---
 
 ## Detailed Analysis
 
-### Top Tier: The "Must Do" Projects
+### Top Tier: The "Proven" Projects
 
-**1. Vector 1: Flash Flood (Score: 4.75)**
-*   **Why:** This is the single biggest differentiator of the Fractal architecture. No other AR model can generate 10k tokens/sec. It is highly falsifiable (speed is a number), runs on the M2 (logic), and cheap to prove on cloud (inference only).
-*   **Risk:** Engineering complexity in the parallel harness.
+**1. Vector 6: Program Synthesis (Score: 4.82)**
+*   **Why:** Tied for first place. Phase 14 (Reboot) was a decisive success (+6% Pass@1). It combines maximum "Demo-ability" (generating working code) with perfect "Falsifiability" (execution).
+*   **Status:** Proven. The feedback loop works.
+*   **Risk:** Scaling the "Critic" to larger models.
 
-**2. Vector 3: Ouroboros (Score: 4.75)**
-*   **Why:** "Self-correction" is the hottest topic in AI (o1, System 2), and we have a unique angle (Energy Head). It reuses the Phase 6 code almost entirely. Falsifiability is perfect: math/logic is binary.
-*   **Risk:** None. It's the logical next step.
+**2. Vector 1: Flash Flood (Score: 4.82)**
+*   **Why:** Tied for first place. The "10k tokens/sec" claim is a massive demo driver (Score: 5) and highly falsifiable.
+*   **Status:** Pending large-scale implementation.
+*   **Risk:** Engineering complexity.
 
-**3. Vector 6: Program Synthesis (Score: 4.60)**
-*   **Why:** Code is the perfect domain for fractals (rigid hierarchy). It combines the structure of Vector 1 with the rigor of Vector 3.
-*   **Risk:** Requires training a "Instruction Tuned" Manager, which is a new data pipeline.
+### Mid Tier: High Potential / Pivot Needed
 
-### Mid Tier: Valuable but Niche
+**3. Vector 3: Ouroboros (Score: 4.04)**
+*   **Why:** Falsifiability is perfect, but "Demo-ability" took a hit (Score: 2) because the energy head is invisible and failed to prevent hallucinations in Phase 10.
+*   **Pivot:** Needs to move to "Hard Verification" (Execution) to regain value.
 
-**4. Vector 4: Governance (Score: 3.80)**
-*   **Why:** Easy to do (reuse Ouroboros), but less "flashy." Harder to create a viral demo than "Speed" or "Coding."
+**4. Vector 7: Hierarchical Editing (Score: 3.47)**
+*   **Why:** Good demo potential (Score: 4) but lacks a standard benchmark (Baseline: 2).
 
-**5. Vector 7: Hierarchical Editing (Score: 3.70)**
-*   **Why:** Technically interesting, but lacks a standard benchmark (Baseline Clarity is low). Hard to prove "SOTA."
+**5. Vector 5: World Models (Score: 3.36)**
+*   **Why:** Incredible demo potential (Score: 5) but very expensive (Cloud: 2) and low reuse of current code (Reuse: 2).
+
+**6. Vector 4: Governance (Score: 3.34)**
+*   **Why:** Dragged down by Ouroboros's failure. Hard to demo "safety" without a working verifier.
 
 ### Low Tier: The "Trap" Projects
 
-**6. Vector 5: World Models (Score: 3.15)**
-*   **Why:** High conceptual value, but RL is a compute sinkhole. Hard to prototype effectively on an M2.
+**7. Vector 2: Holographic (Score: 3.04)**
+*   **Why:** Low demo value (Score: 2). Data efficiency is abstract and hard to show.
 
-**7. Vector 2: Holographic (Score: 2.95)**
-*   **Why:** Proving "Data Efficiency" requires training to convergence against SOTA baselines. That costs $10k+, not $500. We cannot falsify this claim with our current resources.
+**8. Vector 8: Multi-Modal (Score: 2.93)**
+*   **Why:** Huge compute costs (Cloud: 1) and requires a complete rewrite (Reuse: 1).
 
-**8. Vector 8: Multi-Modal (Score: 2.65)**
-*   **Why:** Complete rewrite. Images/Video require massive bandwidth and compute.
-
-**9. Vector 9: Data Curation (Score: 2.80)**
-*   **Why:** Scientific curiosity. Doesn't result in a product or a demo that regular people understand.
+**9. Vector 9: Data Curation (Score: 2.52)**
+*   **Why:** Scientific instrument. Zero demo value (Score: 1) for a product showcase.
 
 ---
 
 ## Recommendation
-**Merge Vector 1 (Speed), Vector 3 (Reliability), and Vector 6 (Coding).**
-Build a **"Flash Flood Coding Assistant"** that:
-1.  Generates code instantly (Vector 1).
-2.  Verifies it passes tests/syntax (Vector 3).
-3.  Solves complex prompts (Vector 6).
+**Pivot fully to Vector 6 (Program Synthesis) and Vector 1 (Flash Flood).**
+
+The new weighting (Demo = 32%) clarifies the priority: we need **Showable Speed** and **Working Code**.
+1.  **Primary Goal:** "The Flash Flood Coder." A model that generates code at 10k tokens/sec (Vector 1) and verifies it via execution (Vector 6).
+2.  **Deprioritize:** Pure Ouroboros (Energy) and abstract research (Holographic).
