@@ -158,15 +158,19 @@ python lambda_helper.py sync research-log/PHASE_DIR
 **Standard template (ALWAYS use this pattern):**
 ```bash
 ssh lambda "source ~/.local/bin/env && cd ~/Fractal && \
-  source research-log/phase11-fractal-logic/.venv/bin/activate && \
-  python research-log/PHASE_DIR/SCRIPT.py" 2>&1 | tee /tmp/LOGFILE.log
+  source research-log/PHASE_DIR/.venv/bin/activate && \
+  python research-log/PHASE_DIR/SCRIPT.py 2>&1 | tee ~/Fractal/research-log/PHASE_DIR/run.log" \
+  2>&1 | tee /tmp/LOGFILE.log
 ```
 
 **Why this pattern:**
 - `source ~/.local/bin/env` - Loads uv/Python paths
 - `cd ~/Fractal` - Sets working directory
-- `source .venv/bin/activate` - Uses shared venv with all dependencies
-- `2>&1 | tee /tmp/FILE.log` - Captures all output locally for review
+- `source .venv/bin/activate` - Uses phase-specific venv with dependencies
+- `| tee ~/Fractal/.../run.log` - **Logs on Lambda** (persists even if SSH disconnects)
+- `2>&1 | tee /tmp/FILE.log` - **Logs locally** (for easy monitoring)
+
+**CRITICAL:** Always log both locally AND on Lambda! If SSH disconnects, Lambda logs persist.
 
 ### 4. Check Running Processes
 
