@@ -30,6 +30,9 @@ class UniversalDenoiserDataset(Dataset):
         sigma_min: float = 0.1,
         sigma_max: float = 0.9,
         corruption_mode: str = 'mixed',  # 'mixed', 'mask_only'
+        high_noise_bias: float = 0.0,  # Fraction of samples to bias toward σ ∈ [0.8, 1.0]
+        ar_prefix_ratio: float = 0.0,  # Fraction of samples with AR-prefix corruption
+        ar_prefix_len: int = 3,  # Number of clean tokens to keep as AR prefix
     ):
         self.num_samples = num_samples
         self.max_depth = max_depth
@@ -39,6 +42,9 @@ class UniversalDenoiserDataset(Dataset):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.corruption_mode = corruption_mode
+        self.high_noise_bias = high_noise_bias
+        self.ar_prefix_ratio = ar_prefix_ratio
+        self.ar_prefix_len = ar_prefix_len
 
         # Vocabulary
         self.vocab = [
@@ -122,25 +128,70 @@ class UniversalDenoiserDataset(Dataset):
         text = self.data[idx]
         clean = self._tokenize(text)
 
-        # Sample noise level
-        sigma = random.uniform(self.sigma_min, self.sigma_max)
+        # AR-prefix mode: keep first N tokens clean, mask the rest
+        # This trains the model to work with hybrid AR+MaskGIT generation
+        if self.ar_prefix_ratio > 0 and random.random() < self.ar_prefix_ratio:
+            corrupted = self._ar_prefix_corrupt(clean)
+            # For AR-prefix, sigma represents the fraction masked (high)
+            # Find actual sequence length (non-PAD)
+            seq_len = (clean != self.pad_id).sum().item()
+            prefix_len = min(self.ar_prefix_len + 1, seq_len - 1)  # +1 for BOS
+            sigma = 1.0 - (prefix_len / seq_len)  # ~0.8-0.95 depending on length
+        else:
+            # Normal corruption mode
+            # Sample noise level (with optional high-noise bias for generation training)
+            if self.high_noise_bias > 0 and random.random() < self.high_noise_bias:
+                # High-noise regime: σ ∈ [0.8, sigma_max] to train on near-full masking
+                sigma = random.uniform(0.8, self.sigma_max)
+            else:
+                # Normal regime
+                sigma = random.uniform(self.sigma_min, self.sigma_max)
 
-        # Apply corruption
-        if self.corruption_mode == 'mask_only':
-            corrupted = mask_sequence(
-                clean, sigma, self.mask_id, self.special_tokens, self.pad_id
-            )
-        else:  # 'mixed'
-            corrupted = corrupt_sequence(
-                clean, sigma,
-                vocab_size=len(self.vocab),
-                special_tokens=self.special_tokens,
-                mask_token_id=self.mask_id,
-                pad_token_id=self.pad_id,
-                max_len=self.max_len,
-            )
+            # Apply corruption
+            if self.corruption_mode == 'mask_only':
+                corrupted = mask_sequence(
+                    clean, sigma, self.mask_id, self.special_tokens, self.pad_id
+                )
+            else:  # 'mixed'
+                corrupted = corrupt_sequence(
+                    clean, sigma,
+                    vocab_size=len(self.vocab),
+                    special_tokens=self.special_tokens,
+                    mask_token_id=self.mask_id,
+                    pad_token_id=self.pad_id,
+                    max_len=self.max_len,
+                )
 
         return clean, corrupted, torch.tensor(sigma, dtype=torch.float32)
+
+    def _ar_prefix_corrupt(self, clean: torch.Tensor) -> torch.Tensor:
+        """
+        AR-prefix corruption: keep first N tokens clean, mask the rest.
+
+        This simulates the input distribution during hybrid generation:
+        - BOS + first ar_prefix_len tokens are kept (AR-generated prefix)
+        - Remaining tokens (except EOS) are masked
+        - EOS is kept
+
+        Example with ar_prefix_len=3:
+        Clean:     <BOS> ( + 1 0 ) = 1 0 <EOS> <PAD> ...
+        Corrupted: <BOS> ( + 1 <MASK> <MASK> <MASK> <MASK> <MASK> <EOS> <PAD> ...
+        """
+        corrupted = clean.clone()
+        seq_len = (clean != self.pad_id).sum().item()
+
+        # Prefix: BOS + ar_prefix_len tokens
+        # Keep positions [0, ar_prefix_len] clean (BOS at 0)
+        prefix_end = min(self.ar_prefix_len + 1, seq_len - 1)  # +1 for BOS, -1 to leave room for EOS
+
+        # Find EOS position
+        eos_pos = seq_len - 1
+
+        # Mask everything between prefix and EOS
+        for i in range(prefix_end, eos_pos):
+            corrupted[i] = self.mask_id
+
+        return corrupted
 
     def decode(self, tokens: torch.Tensor) -> str:
         """Convert token ids back to string."""

@@ -1,19 +1,19 @@
 """
-Training script for Universal Denoiser.
+Training script for Two-Stage Generation.
 
-Stage 1: Reconstruction loss only (no energy head).
+Stage 1: Skeleton Generator - learns structure (parens, ops, =)
+Stage 2: Digit Filler - fills in digits given skeleton
 """
 
 import os
 import random
 import argparse
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from model import UniversalDenoiser, Config
-from data import UniversalDenoiserDataset, collate_fn
+from data_twostage import SkeletonDataset, DigitFillerDataset, collate_fn
 
 
 def train(args):
@@ -25,18 +25,22 @@ def train(args):
     print(f"Using device: {device}")
 
     # Dataset
-    print("Creating dataset...")
-    train_ds = UniversalDenoiserDataset(
-        num_samples=args.num_samples,
-        max_depth=args.max_depth,
-        max_len=args.max_len,
-        sigma_min=args.sigma_min,
-        sigma_max=args.sigma_max,
-        corruption_mode=args.corruption_mode,
-        high_noise_bias=args.high_noise_bias,
-        ar_prefix_ratio=args.ar_prefix_ratio,
-        ar_prefix_len=args.ar_prefix_len,
-    )
+    print(f"Creating {args.stage} dataset...")
+    if args.stage == 'skeleton':
+        train_ds = SkeletonDataset(
+            num_samples=args.num_samples,
+            max_depth=args.max_depth,
+            max_len=args.max_len,
+            sigma_min=args.sigma_min,
+            sigma_max=args.sigma_max,
+        )
+    else:  # 'filler'
+        train_ds = DigitFillerDataset(
+            num_samples=args.num_samples,
+            max_depth=args.max_depth,
+            max_len=args.max_len,
+        )
+
     train_dl = DataLoader(
         train_ds,
         batch_size=args.batch_size,
@@ -47,6 +51,7 @@ def train(args):
 
     print(f"Dataset size: {len(train_ds)}")
     print(f"Vocab size: {len(train_ds.vocab)}")
+    print(f"Vocab: {train_ds.vocab}")
 
     # Model
     config = Config()
@@ -56,7 +61,6 @@ def train(args):
     config.n_head = args.n_head
     config.n_embd = args.n_embd
     config.dropout = args.dropout
-    config.use_self_cond = args.use_self_cond
 
     model = UniversalDenoiser(config).to(device)
     num_params = sum(p.numel() for p in model.parameters())
@@ -69,7 +73,6 @@ def train(args):
         weight_decay=args.weight_decay,
     )
 
-    # Learning rate scheduler (cosine)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=args.max_iters,
@@ -82,15 +85,8 @@ def train(args):
     best_loss = float('inf')
     losses = []
 
-    print(f"\nStarting training for {args.max_iters} iterations...")
-    print(f"  K_iter (recurrent depth): {args.k_iter}")
-    print(f"  Corruption mode: {args.corruption_mode}")
-    print(f"  Self-conditioning: {args.use_self_cond}")
-    print(f"  AR-prefix ratio: {args.ar_prefix_ratio}")
-    print(f"  AR-prefix length: {args.ar_prefix_len}")
-    print()
-
-    pbar = tqdm(total=args.max_iters, desc="Training")
+    print(f"\nStarting {args.stage} training for {args.max_iters} iterations...")
+    pbar = tqdm(total=args.max_iters, desc=f"Training ({args.stage})")
 
     while iter_num < args.max_iters:
         for clean, corrupted, sigma in train_dl:
@@ -101,32 +97,23 @@ def train(args):
             corrupted = corrupted.to(device)
             sigma = sigma.to(device)
 
-            # Prepare targets: predict clean tokens, ignore PAD
+            # Targets: predict clean, ignore PAD
             targets = clean.clone()
-            targets[clean == train_ds.pad_id] = -1  # Ignore index
+            targets[clean == train_ds.pad_id] = -1
 
-            # Self-conditioning: 50% of the time, get previous predictions
-            prev_logits = None
-            if args.use_self_cond and random.random() > 0.5:
-                with torch.no_grad():
-                    prev_logits, _ = model(corrupted, sigma, K_iter=1)
-                    prev_logits = prev_logits.detach()
-
-            # Forward pass with recurrence
-            logits, loss = model(corrupted, sigma, targets, K_iter=args.k_iter, prev_logits=prev_logits)
+            # Forward
+            logits, loss = model(corrupted, sigma, targets, K_iter=args.k_iter)
 
             # Backward
             optimizer.zero_grad()
             loss.backward()
 
-            # Gradient clipping
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
             optimizer.step()
             scheduler.step()
 
-            # Logging
             losses.append(loss.item())
             iter_num += 1
             pbar.update(1)
@@ -134,16 +121,11 @@ def train(args):
             if iter_num % args.log_interval == 0:
                 avg_loss = sum(losses[-100:]) / min(100, len(losses))
                 lr = scheduler.get_last_lr()[0]
-                pbar.set_postfix({
-                    'loss': f'{avg_loss:.4f}',
-                    'lr': f'{lr:.2e}',
-                })
+                pbar.set_postfix({'loss': f'{avg_loss:.4f}', 'lr': f'{lr:.2e}'})
 
             if iter_num % args.eval_interval == 0:
-                # Quick eval: sample a batch and check reconstruction
                 model.eval()
                 with torch.no_grad():
-                    # Take first few samples
                     sample_clean = clean[:4]
                     sample_corrupted = corrupted[:4]
                     sample_sigma = sigma[:4]
@@ -151,22 +133,17 @@ def train(args):
                     logits, _ = model(sample_corrupted, sample_sigma, K_iter=args.k_iter)
                     pred = logits.argmax(dim=-1)
 
-                    # Compute accuracy (non-PAD tokens)
                     mask = sample_clean != train_ds.pad_id
                     correct = (pred == sample_clean) & mask
                     acc = correct.sum().item() / mask.sum().item()
 
                     print(f"\n[Iter {iter_num}] Eval accuracy: {acc:.2%}")
-
-                    # Show example
                     print(f"  Clean:     {train_ds.decode(sample_clean[0])}")
-                    print(f"  Corrupted: {train_ds.decode(sample_corrupted[0])}")
+                    print(f"  Input:     {train_ds.decode(sample_corrupted[0])}")
                     print(f"  Predicted: {train_ds.decode(pred[0])}")
-                    print(f"  Sigma:     {sample_sigma[0].item():.2f}")
 
                 model.train()
 
-            # Save checkpoint
             if iter_num % args.save_interval == 0:
                 if not os.path.exists(args.checkpoint_dir):
                     os.makedirs(args.checkpoint_dir)
@@ -180,12 +157,12 @@ def train(args):
                     'config': config.__dict__,
                     'args': vars(args),
                     'loss': avg_loss,
+                    'vocab': train_ds.vocab,
+                    'stoi': train_ds.stoi,
                 }
 
-                # Save latest
                 torch.save(checkpoint, os.path.join(args.checkpoint_dir, 'latest.pt'))
 
-                # Save best
                 if avg_loss < best_loss:
                     best_loss = avg_loss
                     torch.save(checkpoint, os.path.join(args.checkpoint_dir, 'best.pt'))
@@ -200,20 +177,26 @@ def train(args):
     final_checkpoint = {
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
-        'scheduler': scheduler.state_dict(),
         'iter_num': iter_num,
         'config': config.__dict__,
         'args': vars(args),
         'loss': sum(losses[-100:]) / min(100, len(losses)),
+        'vocab': train_ds.vocab,
+        'stoi': train_ds.stoi,
     }
     torch.save(final_checkpoint, os.path.join(args.checkpoint_dir, 'final.pt'))
-    print(f"\nTraining complete. Final checkpoint saved to {args.checkpoint_dir}/final.pt")
+    print(f"\nTraining complete. Checkpoint saved to {args.checkpoint_dir}/")
 
     return model, train_ds
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train Universal Denoiser')
+    parser = argparse.ArgumentParser(description='Train Two-Stage Models')
+
+    # Stage selection
+    parser.add_argument('--stage', type=str, required=True,
+                        choices=['skeleton', 'filler'],
+                        help='Which stage to train: skeleton or filler')
 
     # Data
     parser.add_argument('--num_samples', type=int, default=20000)
@@ -221,28 +204,17 @@ def main():
     parser.add_argument('--max_len', type=int, default=64)
     parser.add_argument('--sigma_min', type=float, default=0.1)
     parser.add_argument('--sigma_max', type=float, default=0.9)
-    parser.add_argument('--high_noise_bias', type=float, default=0.0,
-                        help='Fraction of samples to bias toward σ ∈ [0.8, sigma_max] (for generation training)')
-    parser.add_argument('--corruption_mode', type=str, default='mixed',
-                        choices=['mixed', 'mask_only'])
-    parser.add_argument('--ar_prefix_ratio', type=float, default=0.0,
-                        help='Fraction of samples with AR-prefix corruption (for hybrid generation training)')
-    parser.add_argument('--ar_prefix_len', type=int, default=3,
-                        help='Number of tokens to keep as AR prefix (after BOS)')
 
     # Model
     parser.add_argument('--n_layer', type=int, default=2)
     parser.add_argument('--n_head', type=int, default=4)
     parser.add_argument('--n_embd', type=int, default=128)
     parser.add_argument('--dropout', type=float, default=0.0)
-    parser.add_argument('--k_iter', type=int, default=2,
-                        help='Recurrent iterations during training')
-    parser.add_argument('--use_self_cond', action='store_true',
-                        help='Enable self-conditioning (feed previous predictions back)')
+    parser.add_argument('--k_iter', type=int, default=2)
 
     # Training
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--max_iters', type=int, default=2000)
+    parser.add_argument('--max_iters', type=int, default=1500)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--grad_clip', type=float, default=1.0)
@@ -251,12 +223,17 @@ def main():
     parser.add_argument('--log_interval', type=int, default=50)
     parser.add_argument('--eval_interval', type=int, default=200)
     parser.add_argument('--save_interval', type=int, default=500)
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints_twostage')
 
     # Device
     parser.add_argument('--device', type=str, default='auto')
 
     args = parser.parse_args()
+
+    # Set checkpoint dir based on stage
+    if args.checkpoint_dir == 'checkpoints_twostage':
+        args.checkpoint_dir = f'checkpoints_{args.stage}'
+
     train(args)
 
 

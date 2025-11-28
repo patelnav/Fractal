@@ -14,7 +14,10 @@ from torch.nn import functional as F
 
 
 class BidirectionalSelfAttention(nn.Module):
-    """Bidirectional attention - every token attends to every other token."""
+    """Bidirectional attention - every token attends to every other token.
+
+    Supports optional causal mode for AR warmstart.
+    """
 
     def __init__(self, config):
         super().__init__()
@@ -25,15 +28,20 @@ class BidirectionalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, causal=False):
         B, T, C = x.size()
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
 
-        # Bidirectional: no masking
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+
+        # Apply causal mask if requested (for AR warmstart)
+        if causal:
+            mask = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+            att = att.masked_fill(mask, float('-inf'))
+
         att = F.softmax(att, dim=-1)
         att = self.dropout(att)
         y = att @ v
@@ -67,8 +75,8 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+    def forward(self, x, causal=False):
+        x = x + self.attn(self.ln_1(x), causal=causal)
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -126,6 +134,11 @@ class UniversalDenoiser(nn.Module):
         self.wpe = nn.Embedding(config.block_size, config.n_embd)  # Position
         self.wne = NoiseEmbedding(config.n_embd)  # Noise level
 
+        # Self-conditioning: separate embedding for previous predictions
+        self.use_self_cond = getattr(config, 'use_self_cond', False)
+        if self.use_self_cond:
+            self.wte_prev = nn.Embedding(config.vocab_size, config.n_embd)
+
         self.drop = nn.Dropout(config.dropout)
 
         # Recurrent blocks (n_layer blocks, each can be iterated)
@@ -150,12 +163,14 @@ class UniversalDenoiser(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, sigma, targets=None, K_iter=1):
+    def forward(self, idx, sigma, targets=None, K_iter=1, prev_logits=None, causal=False):
         """
         idx: (B, T) token indices (possibly corrupted/masked)
         sigma: (B,) noise levels in [0, 1]
         targets: (B, T) ground truth tokens (optional, for loss)
         K_iter: number of times to iterate through blocks (recurrence)
+        prev_logits: (B, T, vocab_size) previous iteration's predictions (for self-conditioning)
+        causal: bool - if True, use causal attention (for AR warmstart)
 
         Returns: logits, loss (if targets provided)
         """
@@ -171,14 +186,19 @@ class UniversalDenoiser(nn.Module):
         pos_emb = self.wpe(pos)  # (T, n_embd)
         noise_emb = self.wne(sigma)  # (B, n_embd)
 
-        # Combine: token + position + noise (broadcast noise to all positions)
-        x = tok_emb + pos_emb + noise_emb.unsqueeze(1)
+        # Self-conditioning: blend previous prediction embedding
+        if prev_logits is not None and self.use_self_cond:
+            prev_pred = prev_logits.argmax(dim=-1)  # (B, T)
+            prev_emb = self.wte_prev(prev_pred)  # (B, T, n_embd)
+            x = tok_emb + pos_emb + noise_emb.unsqueeze(1) + 0.5 * prev_emb
+        else:
+            x = tok_emb + pos_emb + noise_emb.unsqueeze(1)
         x = self.drop(x)
 
         # Recurrent application of blocks
         for _ in range(K_iter):
             for block in self.blocks:
-                x = block(x)
+                x = block(x, causal=causal)
 
         x = self.ln_f(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)
@@ -194,7 +214,7 @@ class UniversalDenoiser(nn.Module):
 
         return logits, loss
 
-    def get_hidden(self, idx, sigma, K_iter=1):
+    def get_hidden(self, idx, sigma, K_iter=1, prev_logits=None):
         """Get hidden states (for future energy head)."""
         device = idx.device
         B, T = idx.size()
@@ -204,7 +224,13 @@ class UniversalDenoiser(nn.Module):
         pos_emb = self.wpe(pos)
         noise_emb = self.wne(sigma)
 
-        x = tok_emb + pos_emb + noise_emb.unsqueeze(1)
+        # Self-conditioning
+        if prev_logits is not None and self.use_self_cond:
+            prev_pred = prev_logits.argmax(dim=-1)
+            prev_emb = self.wte_prev(prev_pred)
+            x = tok_emb + pos_emb + noise_emb.unsqueeze(1) + 0.5 * prev_emb
+        else:
+            x = tok_emb + pos_emb + noise_emb.unsqueeze(1)
         x = self.drop(x)
 
         for _ in range(K_iter):
@@ -342,6 +368,7 @@ class Config:
     block_size = 128     # Max sequence length
     bias = False         # Use bias in linear layers
     vocab_size = 19      # Will be set by dataset
+    use_self_cond = False  # Self-conditioning: feed previous predictions back
 
 
 if __name__ == "__main__":

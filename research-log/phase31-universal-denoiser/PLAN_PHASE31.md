@@ -1,305 +1,194 @@
-# Phase 31: Universal Denoising Engine
+# Plan: Fix Phase 31 Generation (Target: 85%+)
 
-## Core Thesis
+## Current State
 
-A single **recurrent bidirectional diffusion model** trained on a **continuous noise curriculum** can unify:
-- **Generation** (full mask → complete sequence)
-- **Repair** (corrupted draft → fixed sequence)
-- **Editing** (local mask → local fill)
+| Model | Generation | Has = | Repair | Editing | Notes |
+|-------|------------|-------|--------|---------|-------|
+| V1 + Hybrid AR3 | **57.0%** | 10% | 84.5% | 100% | **BEST** - AR warmstart + MaskGIT |
+| V1 (baseline) | 38.5% | 20% | 83.8% | 100% | σ ∈ [0.1, 0.9], 20K samples, 2000 iters |
+| V4 (self-cond) | 25.0% | 16% | 83.4% | 100% | Self-conditioning FAILED |
+| V2 (scaled up) | 39% | 33% | 84% | 100% | σ ∈ [0.1, 1.0] + 30% high-noise bias - FAILED |
+| V3 (minimal) | 43% | 1% | TBD | TBD | σ ∈ [0.1, 1.0] - FAILED |
 
-All three are points on the same denoising curve. The model trades compute for quality at inference time via iterative refinement.
+**Current Best:** 57% syntax validity with Hybrid AR3+MaskGIT (target: 85%)
+**Improvement:** +18.5pp over V1 MaskGIT baseline (38.5% → 57%)
 
----
+**Original Hypothesis (WRONG):** Training distribution mismatch (σ ∈ [0.1, 0.9], never sees σ = 1.0)
 
-## Hypothesis to Falsify
+**Revised Understanding:** Extending σ_max to 1.0 makes things WORSE, not better:
+- V2: Generation dropped 51% → 39%
+- V3: Generation dropped 53.5% → 43%, and '=' almost never appears (1%)
 
-> A recurrent bidirectional transformer, trained on (corrupted, clean) pairs at varying noise levels, achieves:
-> 1. **>85% structural accuracy** on generation (vs Phase 30's 80.6%)
-> 2. **>90% repair accuracy** when given 20% corrupted inputs
-> 3. **100% anchor stability** when editing local regions (masked positions change, unmasked stay fixed)
-> 4. **Single model** handles all three tasks without task-specific heads
-
-If any of 1-4 fails, we learn which component is the bottleneck.
-
----
-
-## Architecture
-
-### Base: Recurrent Bidirectional Transformer
-
-```
-┌─────────────────────────────────────────────┐
-│  Input: x_noisy (partially masked/corrupted)│
-└─────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────┐
-│  Token Embed + Position Embed + Noise Embed │  ← NEW: timestep/noise-level embedding
-└─────────────────────────────────────────────┘
-                    │
-        ┌───────────┴───────────┐
-        │   RECURRENT BLOCK     │ ← Same weights applied K times
-        │  (Bidirectional Attn) │
-        │  (MLP)                │
-        │  (LayerNorm)          │
-        └───────────┬───────────┘
-                    │ (loop K times, K=1..8 at inference)
-                    ▼
-┌─────────────────────────────────────────────┐
-│  Output Head: logits for all positions      │
-└─────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────┐
-│  Energy Head (optional): scalar score       │  ← Contrastive validity score
-└─────────────────────────────────────────────┘
-```
-
-### Key Differences from Phase 30
-
-| Component | Phase 30 | Phase 31 |
-|-----------|----------|----------|
-| Depth | 4 fixed layers | 1-2 layers × K iterations (recurrent) |
-| Noise Input | Implicit (mask token) | Explicit noise-level embedding |
-| Training | Uniform random masking | **Structured noise curriculum** |
-| Energy Head | None | Contrastive head on final hidden state |
-| Inference | 5-step Gibbs | 1-8 step iterative refinement |
+**Why σ=1.0 hurts:** At σ=1.0, ALL tokens become MASK. The model sees (all MASK) → (clean) pairs with no conditional signal. This may teach the model to ignore the input entirely, which breaks the iterative refinement that MaskGIT depends on.
 
 ---
 
-## Training: Continuous Noise Curriculum
+## Next Steps: Alternative Approaches
 
-### Noise Levels (σ ∈ [0, 1])
+Since extending σ_max failed, we need different strategies:
 
-| σ | Interpretation | Training Task |
-|---|----------------|---------------|
-| 0.0 | Clean input | Identity (copy through) |
-| 0.1-0.3 | Light corruption | **Repair** (typos, swaps) |
-| 0.4-0.6 | Medium corruption | **Partial generation** |
-| 0.7-0.9 | Heavy masking | **Generation from scratch** |
-| 1.0 | Full mask | **Unconditional generation** |
-
-### Corruption Types (Mutation Engine)
-
-Inspired by Phase 18's synthetic mutations:
-1. **Token replacement**: Random token → random other token
-2. **Token deletion**: Remove token, shift left
-3. **Token insertion**: Insert random token, shift right
-4. **Swap**: Adjacent token swap
-5. **Masking**: Replace with `<MASK>`
-
-Each training sample: `(x_clean, x_corrupted, σ)` where `σ` controls corruption intensity.
-
-### Loss Function
+### Option A: Self-Conditioning (from FIX_GENERATION.md Tier 2)
+Feed previous iteration's prediction as auxiliary input. Proven on Imagen, SoundStorm.
 
 ```python
-# Primary: Reconstruction loss
-loss_recon = cross_entropy(logits, x_clean, ignore_index=PAD)
+# In forward pass
+if self.prev_logits is not None:
+    x_prev_estimate = self.prev_logits.argmax(-1)
+    hidden = self.embed(x_noisy) + 0.5 * self.embed(x_prev_estimate) + self.noise_embed(σ)
+```
 
-# Secondary: Energy loss (contrastive)
-# Positive pairs: (x_corrupted, x_clean) → energy ≈ 0
-# Negative pairs: (x_corrupted, x_wrong) → energy ≈ 1
-loss_energy = binary_cross_entropy(energy_head(hidden), labels)
+**Effort:** ~2 hours to implement and test
+**Rationale:** Gives the model "memory" of its previous guess, reducing the cold-start problem
 
-# Combined
-loss = loss_recon + λ * loss_energy  # λ = 0.1
+### Option B: AR Warmstart (Hybrid Approach)
+Generate first 3-5 tokens autoregressively, then switch to bidirectional fill.
+
+```python
+def generate_hybrid(model, length):
+    # Phase 1: AR generates initial structure
+    x = [BOS_ID]
+    for _ in range(3):
+        logits = causal_model(x)  # Need a causal head
+        x.append(sample(logits[-1]))
+
+    # Phase 2: Pad with MASK, run bidirectional
+    x = x + [MASK_ID] * (length - len(x) - 1) + [EOS_ID]
+    return maskgit_refine(model, x)
+```
+
+**Effort:** ~4 hours (need causal attention head)
+**Rationale:** Provides structural anchors naturally
+
+### Option C: Two-Stage: Coarse → Fine
+1. First model generates "skeleton" (operators, parens, =)
+2. Second pass fills in digits
+
+**Effort:** ~1 day
+**Rationale:** Separates structural decisions from content
+
+---
+
+## Experiment Results
+
+### Hyperparameter Experiments (Failed)
+
+| Version | Config | Generation | Has = | Status |
+|---------|--------|------------|-------|--------|
+| V1 | σ_max=0.9 | 53.5% | 23% | **BASELINE** |
+| V2 | σ_max=1.0 + bias + scale | 39% | 33% | FAILED |
+| V3 | σ_max=1.0 | 43% | 1% | FAILED |
+
+**Conclusion:** Training on σ=1.0 (full mask) hurts generation. The model needs some signal to work with.
+
+### Architecture Experiments
+
+#### Option A: Self-Conditioning (FAILED)
+
+Implemented self-conditioning: feeding previous iteration's predictions back as auxiliary input.
+
+| Model | Config | Syntax Valid | Has = | Has Ops | Status |
+|-------|--------|--------------|-------|---------|--------|
+| V1 (no self-cond) | baseline | 38.5% | 20% | 84.5% | BASELINE |
+| V4 (with self-cond) | use_self_cond=True | 25.0% | 16% | 84.5% | **FAILED** |
+| V4 (without self-cond) | use_self_cond=False at inference | 19.5% | 13% | 84.5% | FAILED |
+
+**Why it failed:** The model became dependent on the self-conditioning signal during training, and when starting from scratch (no previous prediction), it struggled more than V1. This is similar to the σ=1.0 problem - no signal leads to poor generation.
+
+#### Option B: AR Warmstart (SUCCESS!)
+
+Implemented hybrid generation: generate first N tokens autoregressively, then use MaskGIT for the rest.
+
+| Model | Config | Syntax Valid | Has = | Has Ops | Repair | Status |
+|-------|--------|--------------|-------|---------|--------|--------|
+| V1 MaskGIT | baseline | 38.5% | 20% | 84.5% | 83.8% | - |
+| V1 Hybrid AR3 | num_ar_tokens=3 | **57.0%** | 10% | 68.5% | 84.5% | **BEST** |
+| V1 Hybrid AR5 | num_ar_tokens=5 | 57.5% | 6% | 43.0% | 84.4% | Similar |
+
+**Why it works:** The AR warmstart provides structural anchors (BOS + first few tokens) that the bidirectional MaskGIT can build around. This addresses the "cold start" problem without requiring training changes.
+
+**AR3 vs AR5:** AR3 is preferred because it maintains better coverage on "has equals" and "has ops" metrics while achieving similar syntax validity.
+
+---
+
+## Code Changes Made
+
+### 1. data.py
+Added `high_noise_bias` parameter for optional high-noise sampling:
+```python
+def __init__(self, ..., high_noise_bias: float = 0.0):
+    # 30% of samples can be biased toward σ ∈ [0.8, sigma_max]
+```
+
+### 2. train_universal.py
+- Added `--high_noise_bias` CLI argument
+- Added `--use_self_cond` CLI argument for self-conditioning training
+- Added self-conditioning logic with 50% dropout in training loop
+
+### 3. model.py
+- Added `use_self_cond` config flag
+- Added `wte_prev` embedding layer for previous predictions (self-conditioning)
+- Added `causal` parameter to `BidirectionalSelfAttention.forward()` with triangular mask
+- Modified `Block.forward()` and `UniversalDenoiser.forward()` to support causal mode
+- Added `prev_logits` parameter for self-conditioning
+
+### 4. inference.py
+- Added `generate_maskgit_selfcond()` for self-conditioning generation
+- Added `generate_ar_tokens()` for autoregressive token generation
+- Added `generate_hybrid()` for AR warmstart + MaskGIT generation
+- Added batch versions: `generate_maskgit_selfcond_batch()`, `generate_hybrid_batch()`
+
+### 5. benchmark.py
+- Added `--use_self_cond` flag for self-conditioning benchmarks
+- Added `--use_hybrid` and `--num_ar_tokens` flags for hybrid generation benchmarks
+- Updated `benchmark_generation()` and `run_full_benchmark()` to support all modes
+
+**Note:** Inference hacks (anchor seeding, priority unmasking) don't help current models.
+
+---
+
+## Checkpoints
+
+| Path | Description | Generation | Recommendation |
+|------|-------------|------------|----------------|
+| `checkpoints/best.pt` | V1 baseline | 38.5% (57% w/ hybrid) | **USE WITH --use_hybrid** |
+| `checkpoints_v4/best.pt` | V4 self-cond | 25% | Don't use |
+| `checkpoints_v2/best.pt` | V2 scaled | 39% | Don't use |
+| `checkpoints_v3/best.pt` | V3 minimal | 43% | Don't use |
+
+---
+
+## To Resume
+
+**V1 + Hybrid AR3 is the best configuration (57% syntax valid).** Still 28pp short of 85% target.
+
+Options to close the gap:
+
+1. **Option C (Coarse→Fine):** Train separate skeleton generator - may provide better structural guidance
+2. **Hybrid-aware training:** Retrain model with AR-prefix augmentation to improve hybrid performance
+3. **Larger model:** Current model is only 438K params - may need more capacity
+
+Benchmark with hybrid:
+```bash
+python benchmark.py --checkpoint checkpoints/best.pt --num_samples 200 --use_hybrid --num_ar_tokens 3
 ```
 
 ---
 
-## Implementation Plan
+## Experiment Log
 
-### Step 1: Extend Phase 30 Model (`model.py`)
+### V2 Results (Failed)
+- Training: 50K samples, 4000 iters, σ_max=1.0, high_noise_bias=0.3
+- Result: Generation dropped from 51% → 39%
+- Analysis: Model produces more '=' signs but syntax is broken at all σ levels
+- Conclusion: Scaling up + high_noise_bias together broke the model
 
-```python
-class UniversalDenoiser(nn.Module):
-    def __init__(self, config):
-        # Token + Position embeddings (from Phase 30)
-        self.wte = nn.Embedding(vocab_size, n_embd)
-        self.wpe = nn.Embedding(block_size, n_embd)
-
-        # NEW: Noise level embedding
-        self.wne = nn.Embedding(num_noise_levels, n_embd)  # or continuous via MLP
-
-        # Recurrent block (single block, applied K times)
-        self.block = Block(config, causal=False)
-
-        # Output head
-        self.lm_head = nn.Linear(n_embd, vocab_size)
-
-        # Energy head
-        self.energy_head = nn.Sequential(
-            nn.Linear(n_embd, n_embd // 2),
-            nn.ReLU(),
-            nn.Linear(n_embd // 2, 1),
-            nn.Sigmoid()
-        )
-```
-
-### Step 2: Build Mutation Engine (`mutations.py`)
-
-```python
-def corrupt(x_clean, sigma, vocab_size, special_tokens):
-    """Apply corruption at level sigma ∈ [0, 1]"""
-    # Number of positions to corrupt
-    n_corrupt = int(sigma * len(x_clean))
-
-    # Sample corruption types
-    for _ in range(n_corrupt):
-        op = random.choice(['replace', 'delete', 'insert', 'swap', 'mask'])
-        apply_mutation(x, op, vocab_size, special_tokens)
-
-    return x_corrupted
-```
-
-### Step 3: Training Loop (`train_universal.py`)
-
-```python
-for batch in dataloader:
-    x_clean = batch
-
-    # Sample noise level
-    sigma = torch.rand(batch_size) * 0.9 + 0.1  # [0.1, 1.0]
-
-    # Corrupt
-    x_corrupted = corrupt(x_clean, sigma, vocab_size, special_tokens)
-
-    # Forward (K iterations at training time, K=1 or 2)
-    hidden = embed(x_corrupted) + noise_embed(sigma)
-    for _ in range(K_train):
-        hidden = block(hidden)
-
-    logits = lm_head(hidden)
-    energy = energy_head(hidden.mean(dim=1))  # pool over sequence
-
-    # Losses
-    loss_recon = F.cross_entropy(logits, x_clean, ignore_index=PAD)
-    loss_energy = contrastive_loss(energy, ...)
-
-    loss = loss_recon + 0.1 * loss_energy
-    loss.backward()
-```
-
-### Step 4: Inference Modes (`inference.py`)
-
-```python
-def generate(model, length, K_steps=5):
-    """Generation: start from full mask"""
-    x = torch.full((1, length), MASK_ID)
-    for k in range(K_steps):
-        logits = model(x, sigma=1.0 - k/K_steps)
-        x = sample_or_argmax(logits)
-    return x
-
-def repair(model, x_corrupted, K_steps=3):
-    """Repair: start from corrupted input"""
-    x = x_corrupted.clone()
-    for k in range(K_steps):
-        logits = model(x, sigma=0.3)  # light noise assumption
-        x = sample_or_argmax(logits)
-    return x
-
-def edit(model, x, mask_positions, K_steps=2):
-    """Edit: mask specific positions, keep rest anchored"""
-    x[mask_positions] = MASK_ID
-    for k in range(K_steps):
-        logits = model(x, sigma=0.5)
-        x_new = sample_or_argmax(logits)
-        x_new[~mask_positions] = x[~mask_positions]  # ANCHOR
-        x = x_new
-    return x
-```
-
-### Step 5: Evaluation (`benchmark.py`)
-
-| Task | Metric | Target |
-|------|--------|--------|
-| Generation | Structural accuracy (vs ground truth syntax) | >85% |
-| Repair | Edit distance reduction (corrupted → fixed) | >90% recovery |
-| Editing | Anchor stability (unmasked positions unchanged) | 100% |
-| Energy | ROC-AUC on valid vs invalid completions | >0.95 |
-
----
-
-## File Structure
-
-```
-research-log/phase31-universal-denoiser/
-├── PLAN_PHASE31.md          # This plan (copy from here)
-├── model.py                 # UniversalDenoiser architecture
-├── mutations.py             # Corruption/mutation engine
-├── data.py                  # Dataset with (clean, corrupted, sigma) triples
-├── train_universal.py       # Training loop
-├── inference.py             # generate(), repair(), edit()
-├── benchmark.py             # Evaluation harness
-├── test_unified.py          # Unit tests for all three modes
-├── RESULTS.md               # Final results (create after experiments)
-└── checkpoints/             # Saved models
-```
-
----
-
-## Critical Files to Reuse
-
-| Source | Purpose |
-|--------|---------|
-| `phase30/model.py:33-57` | BidirectionalSelfAttention (copy verbatim) |
-| `phase30/model.py:72-86` | Block class (extend with recurrence) |
-| `phase30/fractal_data.py` | FractalMathDataset (extend with mutations) |
-| `phase30/flash_flood.py` | Gibbs sampling loop (adapt for K-step refinement) |
-| `phase14/train_critic.py` | Contrastive energy training pattern |
+### Next: V3
+- Training: 20K samples, 2000 iters, σ_max=1.0, no high_noise_bias
+- Hypothesis: Minimal change will work better
 
 ---
 
 ## Success Criteria
-
-**Minimum Viable Result:**
-- Same model achieves >80% on generation AND >90% on repair AND 100% anchor stability
-- This proves the "unified denoising" thesis
-
-**Stretch Goal:**
-- Beat Phase 30's 80.6% → reach 90%+ structural accuracy on generation
-- Energy head correctly rejects >95% of invalid completions
-
-**Negative Result (Informative Failure):**
-- If recurrence doesn't help: "depth sharing is not the key"
-- If energy head fails: "verification needs execution, not learned scores"
-- If repair mode fails: "generation and repair are not the same task"
-
----
-
-## Decisions
-
-### Domain Progression
-**Phase 31a:** Recursive arithmetic (proven ground from Phase 30)
-**Phase 31b:** JSON/YAML configs (practical, structured)
-**Phase 32:** Simple Python functions (ties to execution-based verification)
-
-### Energy Head: Staged Training
-1. **Stage 1:** Train bidirectional denoiser alone → strong reconstruction/parse accuracy (no energy loss)
-2. **Stage 2:** Freeze trunk, add energy head, train on (corrupt, clean) pairs
-3. **Stage 3 (optional):** Short joint fine-tune with λ_energy ≪ λ_recon if coupling is needed
-
-This de-risks the architecture: if Stage 1 fails, we know denoising is the problem. If Stage 2 fails, we know energy scoring is the problem.
-
----
-
-## Execution Order
-
-```
-Week 1: Stage 1 on Arithmetic
-├── model.py (UniversalDenoiser, no energy head yet)
-├── mutations.py (corruption engine)
-├── data.py (arithmetic + mutations)
-├── train_universal.py (reconstruction only)
-└── benchmark.py (generation, repair, edit metrics)
-
-Week 2: Add Energy + Move to JSON
-├── Add energy_head to model.py
-├── train_energy.py (frozen trunk)
-├── json_data.py (JSON dataset + mutations)
-├── Repeat benchmarks on JSON domain
-└── RESULTS.md
-
-Phase 32 (future): Python functions + execution
-```
+- Generation ≥ 85% syntax valid
+- Repair ≥ 85% (preserve current performance)
+- Editing = 100% (preserve current performance)

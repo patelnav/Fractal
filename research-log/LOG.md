@@ -519,3 +519,36 @@ This is a robust, replicable gain that confirms the "System 2" thesis: verificat
 - On simple expressions (e.g., `(* 3 4) = <MASK><MASK>`), the bidirectional model recovered the exact numeric result in a single step; on more complex ones it often produced structurally correct but numerically imperfect outputs ("math off, syntax valid").
 
 **Conclusion:** Bidirectional diffusion‑style decoders can preserve and exploit "Islands of Correctness" under parallel refinement, unlike causal decoders. This supports the claim that the Flash Flood phase of a future "Fractal Computer" must be bidirectional, even if causal models remain useful as planners.
+
+---
+
+## Phase 31: Universal Denoising Engine
+
+**Objective:** Build a universal denoiser for arithmetic expressions that can repair corrupted inputs, edit existing expressions, and generate new ones from scratch—all with a single bidirectional model using MaskGIT-style progressive unmasking.
+
+**Method:**
+- Domain: Arithmetic expressions like `(3+5)*2=16` with 20-token vocab (digits, operators, parens, special tokens).
+- Model: 2-layer bidirectional transformer (~500K params) with contrastive energy head and iterative refinement (K=2).
+- Training: Masked denoising at varying corruption levels (σ ∈ [0.1, 0.9]).
+- Inference: MaskGIT progressive unmasking for generation; iterative refinement for repair.
+
+**Results:**
+
+| Task | Metric | Result | Status |
+|------|--------|--------|--------|
+| Repair (50% corrupted) | Syntax Valid | 84% | ✓ SUCCESS |
+| Editing (operator swap) | Edit Accuracy | 100% | ✓ SUCCESS |
+| Generation (from mask) | Syntax Valid | 57% | ✗ FAILED |
+| Generation + Rejection | Syntax Valid | 35% | ✗ FAILED |
+| Generation + AR-prefix Training | Syntax Valid | 51.5% | ✗ FAILED |
+| Two-Stage (Skeleton→Digits) | Syntax Valid | 29% | ✗ FAILED |
+
+**Generation Fix Attempts (All Failed):**
+1. **Rejection Sampling** (5-10 candidates): Energy model trained on clean-vs-corrupted, not syntax validity—selected worse candidates.
+2. **Hybrid AR-prefix Training** (50% of batches with 3-token AR prefix): Distribution mismatch—training with partial clean prefix didn't help generation from full mask.
+3. **Two-Stage Coarse→Fine** (skeleton with <DIGIT> placeholders → digit filler): Skeleton generator itself failed—same bidirectional limitation at structure level.
+
+**Root Cause Analysis:**
+Bidirectional models excel at refinement ("given partial signal, complete it") but cannot generate structure from scratch. With a full mask (no signal), the model has no "islands of correctness" to anchor on—it fills positions independently, producing random structure. This is **architectural**, not a training issue.
+
+**Conclusion:** Bidirectional denoising is excellent for repair (84%) and editing (100%) but fundamentally cannot generate valid structure from nothing (29-57%). Generation requires an **autoregressive model** to create structure sequentially, with the bidirectional model serving as a downstream renderer/refiner. This validates the "AR Planner + Bidirectional Renderer" architecture used by SoundStorm, Parti, and MusicGen.

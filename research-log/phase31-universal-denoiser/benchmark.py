@@ -18,10 +18,10 @@ import random
 from tqdm import tqdm
 from typing import Dict, Tuple
 
-from model import UniversalDenoiser, Config
+from model import UniversalDenoiser, UniversalDenoiserWithEnergy, Config
 from data import EvalDataset
 from mutations import corrupt_sequence, mask_sequence
-from inference import generate, generate_maskgit, repair, edit
+from inference import generate, generate_maskgit, generate_maskgit_selfcond, generate_hybrid, generate_with_rejection, repair, edit
 
 
 def load_model(checkpoint_path: str, device: str) -> Tuple[UniversalDenoiser, dict]:
@@ -34,6 +34,16 @@ def load_model(checkpoint_path: str, device: str) -> Tuple[UniversalDenoiser, di
     model.load_state_dict(checkpoint['model'])
     model.eval()
     return model, checkpoint
+
+
+def load_energy_model(checkpoint_path: str, denoiser: UniversalDenoiser, device: str) -> UniversalDenoiserWithEnergy:
+    """Load energy model from checkpoint."""
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    energy_model = UniversalDenoiserWithEnergy(denoiser.config, pretrained_denoiser=denoiser)
+    energy_model.energy_head.load_state_dict(checkpoint['energy_head'])
+    energy_model = energy_model.to(device)
+    energy_model.eval()
+    return energy_model
 
 
 def compute_structural_accuracy(pred: torch.Tensor, target: torch.Tensor, pad_id: int) -> float:
@@ -69,6 +79,11 @@ def benchmark_generation(
     use_maskgit: bool = True,
     maskgit_steps: int = 12,
     maskgit_schedule: str = 'cosine',
+    use_self_cond: bool = False,
+    use_hybrid: bool = False,
+    num_ar_tokens: int = 3,
+    rejection_samples: int = 1,
+    energy_model = None,
 ) -> Dict[str, float]:
     """
     Benchmark generation mode.
@@ -78,23 +93,77 @@ def benchmark_generation(
     - Structural validity (balanced parens, correct format)
     - Token-type distribution similarity
     """
+    if rejection_samples > 1 and energy_model is not None:
+        method_name = f'hybrid_ar{num_ar_tokens}_reject{rejection_samples}'
+    elif use_hybrid:
+        method_name = f'hybrid_ar{num_ar_tokens}'
+    elif use_self_cond:
+        method_name = 'maskgit_selfcond'
+    elif use_maskgit:
+        method_name = 'maskgit'
+    else:
+        method_name = 'naive'
+
     results = {
         'syntax_valid': 0,
         'has_equals': 0,
         'has_ops': 0,
         'total': num_samples,
-        'method': 'maskgit' if use_maskgit else 'naive',
+        'method': method_name,
     }
 
     vocab = eval_ds.stoi
 
-    for i in tqdm(range(num_samples), desc="Generation"):
+    for i in tqdm(range(num_samples), desc=f"Generation ({method_name})"):
         # Get target length from eval set
         target = eval_ds[i % len(eval_ds)]
         length = (target != eval_ds.pad_id).sum().item()
 
-        # Generate
-        if use_maskgit:
+        # Generate with rejection sampling if enabled
+        if rejection_samples > 1 and energy_model is not None:
+            gen = generate_with_rejection(
+                model,
+                energy_model,
+                length=length,
+                mask_token_id=eval_ds.mask_id,
+                pad_token_id=eval_ds.pad_id,
+                bos_token_id=eval_ds.bos_id,
+                eos_token_id=eval_ds.eos_id,
+                n_candidates=rejection_samples,
+                num_ar_tokens=num_ar_tokens,
+                maskgit_steps=maskgit_steps,
+                temperature=0.8,  # Need temperature for diversity
+                schedule=maskgit_schedule,
+                device=device,
+            )
+        elif use_hybrid:
+            gen = generate_hybrid(
+                model,
+                length=length,
+                mask_token_id=eval_ds.mask_id,
+                pad_token_id=eval_ds.pad_id,
+                bos_token_id=eval_ds.bos_id,
+                eos_token_id=eval_ds.eos_id,
+                num_ar_tokens=num_ar_tokens,
+                maskgit_steps=maskgit_steps,
+                temperature=0.0,
+                schedule=maskgit_schedule,
+                device=device,
+            )
+        elif use_self_cond:
+            gen = generate_maskgit_selfcond(
+                model,
+                length=length,
+                mask_token_id=eval_ds.mask_id,
+                pad_token_id=eval_ds.pad_id,
+                bos_token_id=eval_ds.bos_id,
+                eos_token_id=eval_ds.eos_id,
+                num_steps=maskgit_steps,
+                temperature=0.0,
+                schedule=maskgit_schedule,
+                device=device,
+            )
+        elif use_maskgit:
             gen = generate_maskgit(
                 model,
                 length=length,
@@ -288,6 +357,11 @@ def run_full_benchmark(
     use_maskgit: bool = True,
     maskgit_steps: int = 12,
     maskgit_schedule: str = 'cosine',
+    use_self_cond: bool = False,
+    use_hybrid: bool = False,
+    num_ar_tokens: int = 3,
+    rejection_samples: int = 1,
+    energy_model = None,
 ) -> Dict[str, Dict]:
     """Run all benchmarks."""
     eval_ds = EvalDataset(num_samples=num_samples * 2, seed=42)
@@ -297,12 +371,23 @@ def run_full_benchmark(
     print("=" * 60)
 
     # Generation
-    method = "MaskGIT" if use_maskgit else "Naive"
+    if rejection_samples > 1 and energy_model is not None:
+        method = f"Hybrid AR{num_ar_tokens}+Reject{rejection_samples}"
+    elif use_hybrid:
+        method = f"Hybrid AR{num_ar_tokens}+MaskGIT"
+    elif use_self_cond:
+        method = "MaskGIT+SelfCond"
+    elif use_maskgit:
+        method = "MaskGIT"
+    else:
+        method = "Naive"
     print(f"\n1. GENERATION BENCHMARK ({method}, {maskgit_steps} steps, {maskgit_schedule})")
     print("-" * 40)
     gen_results = benchmark_generation(
         model, eval_ds, num_samples=num_samples, K_steps=5, device=device,
         use_maskgit=use_maskgit, maskgit_steps=maskgit_steps, maskgit_schedule=maskgit_schedule,
+        use_self_cond=use_self_cond, use_hybrid=use_hybrid, num_ar_tokens=num_ar_tokens,
+        rejection_samples=rejection_samples, energy_model=energy_model,
     )
     print(f"  Syntax Valid: {gen_results['syntax_valid_rate']:.1%}")
     print(f"  Has Equals:   {gen_results['has_equals_rate']:.1%}")
@@ -356,6 +441,8 @@ def main():
     parser = argparse.ArgumentParser(description='Benchmark Universal Denoiser')
     parser.add_argument('--checkpoint', type=str, default='checkpoints/best.pt',
                         help='Path to model checkpoint')
+    parser.add_argument('--energy_checkpoint', type=str, default='checkpoints/energy_model.pt',
+                        help='Path to energy model checkpoint (for rejection sampling)')
     parser.add_argument('--num_samples', type=int, default=100,
                         help='Number of samples per benchmark')
     parser.add_argument('--device', type=str, default='auto')
@@ -368,6 +455,14 @@ def main():
     parser.add_argument('--maskgit_schedule', type=str, default='cosine',
                         choices=['linear', 'cosine'],
                         help='MaskGIT unmasking schedule')
+    parser.add_argument('--use_self_cond', action='store_true',
+                        help='Use self-conditioning during generation (model must support it)')
+    parser.add_argument('--use_hybrid', action='store_true',
+                        help='Use hybrid AR warmstart + MaskGIT generation')
+    parser.add_argument('--num_ar_tokens', type=int, default=3,
+                        help='Number of AR tokens for hybrid generation')
+    parser.add_argument('--rejection_samples', type=int, default=1,
+                        help='Number of candidates for rejection sampling (1=disabled)')
     args = parser.parse_args()
 
     # Device
@@ -382,6 +477,13 @@ def main():
     model, checkpoint = load_model(args.checkpoint, device)
     print(f"Model loaded (iter {checkpoint.get('iter_num', '?')}, loss {checkpoint.get('loss', '?'):.4f})")
 
+    # Load energy model if rejection sampling is enabled
+    energy_model = None
+    if args.rejection_samples > 1:
+        print(f"Loading energy model from {args.energy_checkpoint}...")
+        energy_model = load_energy_model(args.energy_checkpoint, model, device)
+        print("Energy model loaded")
+
     # MaskGIT settings
     use_maskgit = not args.no_maskgit
 
@@ -390,6 +492,9 @@ def main():
         model, device=device, num_samples=args.num_samples,
         use_maskgit=use_maskgit, maskgit_steps=args.maskgit_steps,
         maskgit_schedule=args.maskgit_schedule,
+        use_self_cond=args.use_self_cond,
+        use_hybrid=args.use_hybrid, num_ar_tokens=args.num_ar_tokens,
+        rejection_samples=args.rejection_samples, energy_model=energy_model,
     )
 
     return results

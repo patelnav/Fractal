@@ -255,3 +255,68 @@ The generation problem is **initialization**, not **capacity**. Every proposed f
 3. Gives the model memory of its previous guesses (self-conditioning)
 
 None require scaling the model.
+
+---
+
+## Update After Experiments (Nov 28, 2025)
+
+**Most predictions above were wrong.** Here's what actually happened:
+
+### Experiment Results
+
+| Predicted Fix | Expected Gain | Actual Result | Status |
+|---------------|---------------|---------------|--------|
+| σ_max=1.0 retraining | +20-30% | **-14pp** (39% vs 53%) | ❌ FAILED |
+| Anchor seeding | +15-20% | **-11pp** (40% vs 51%) | ❌ FAILED |
+| Priority unmasking | +10-15% | **-19pp** (32% vs 51%) | ❌ FAILED |
+| Self-conditioning | +10-20% | **-13.5pp** (25% vs 38.5%) | ❌ FAILED |
+| Energy-guided rejection | +5-10% | **-21.5pp** (35% vs 57%) | ❌ FAILED |
+| Two-stage coarse→fine | N/A | **29%** (skeleton failed too) | ❌ FAILED |
+| **AR Warmstart (Hybrid AR3)** | +15-25% | **+18.5pp** (57% vs 38.5%) | ✅ SUCCESS |
+
+### Why σ=1.0 Training Made Things Worse
+
+The key insight I missed:
+
+> At σ=1.0, ALL tokens become MASK. The model sees `(all MASK) → (clean)` pairs with **no conditional signal**. This teaches the model to ignore the input entirely, which breaks the iterative refinement that MaskGIT depends on.
+
+Training with full-mask doesn't teach "generate from scratch" - it teaches "ignore your input." This damages the model's ability to condition on partial information during MaskGIT's progressive unmasking.
+
+### Why Inference Hacks Failed
+
+- **Anchor seeding**: Model wasn't trained with anchored positions, so it generates expressions that don't fit around the anchors
+- **Priority unmasking**: Structural tokens aren't necessarily more reliable - the model's confidence doesn't align with syntax validity
+- **Energy rejection**: Energy head was trained as a corruption detector, not a syntax validator. Lower energy ≠ valid syntax.
+
+### The Real Root Cause
+
+> **Bidirectional attention is excellent for refinement but cannot create structure from nothing.**
+
+This isn't fixable with hyperparameters or inference tricks. It's a fundamental architectural limitation:
+
+- **Repair/Editing**: Model has partial signal → expands "islands of correctness" → high accuracy
+- **Generation**: Model has no signal → no islands to expand → random structure → low accuracy
+
+### The Actual Solution
+
+Separation of concerns, as used by SoundStorm, Parti, MusicGen:
+
+```
+┌─────────────────┐     ┌─────────────────────┐
+│  AR Planner     │ →   │  Bidirectional      │
+│  (creates       │     │  Renderer           │
+│   structure)    │     │  (fills details)    │
+└─────────────────┘     └─────────────────────┘
+   Sequential            Parallel
+   ~3-10 tokens          ~100 tokens
+```
+
+The Hybrid AR3 approach validates this: 3 AR tokens provide enough structure for bidirectional refinement to work.
+
+### Revised Conclusion
+
+The "universal denoiser" thesis is **partially validated**:
+- ✅ One model handles **repair** and **editing**
+- ❌ **Generation** requires AR architecture for the planning phase
+
+The unified model works when there's signal to condition on. Creating structure from nothing requires sequential commitment (autoregressive), not parallel refinement (bidirectional).
