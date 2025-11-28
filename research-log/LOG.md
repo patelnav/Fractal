@@ -167,21 +167,16 @@ Implement a **Recurrent / Fractal Architecture**.
 *   **Conclusion:** **Neural Compositionality is Solved.** We proved that we can build complex algorithms (Multiplication) by composing pre-trained primitives (Adders) without any additional training, *provided* we enforce digital signal restoration between steps. This effectively creates a **Neural CPU**.
 
 
-
 **Experiment 12.5: Exhaustive Diagnostics**
 
 *   **Verification:** Ran 4-bit $\times$ 4-bit exhaustive multiplication (256 cases).
 
 *   **Result:** **100% Pass**. Confirms the zero-shot result wasn't a fluke. The primitive is robust.
 
-
-
 ---
 
 
-
 ## Phase 13: The Neural RISC-V (Future Work)
-
 
 
 **Initial Attempt (Phase 13.0):**
@@ -191,7 +186,6 @@ We tried to train a Neural Controller to *discover* the Shift-and-Add algorithm 
 *   **Result:** Failed to converge (Acc ~10%).
 
 *   **Analysis:** The search space (Discrete instructions $\times$ 16 steps) is too large for unguided Gradient Descent. The "Credit Assignment" problem is severe.
-
 
 
 **Roadmap:**
@@ -205,16 +199,10 @@ To solve Algorithm Discovery, we need:
 3.  **RL:** Use PPO instead of Gumbel-Softmax for better exploration.
 
 
-
 **Final Status (Nov 26 2025):**
 
 
-
 We have successfully built the **Hardware** of the Neural Computer (Adder, Multiplier, Digital Restoration). The **Software** (Learning Algorithms) remains the next grand challenge.
-
-
-
-
 
 
 
@@ -222,147 +210,60 @@ We have successfully built the **Hardware** of the Neural Computer (Adder, Multi
 
 
 
-
-
-
-
 ## Phase 14: Vector 6 Reboot (Verified Code Generation)
 
 
-
-
-
-
-
 **Objective:** Apply the "Hard Verification" insight from the Neural CPU (Phase 12) to Real-World Code Generation (MBPP).
-
 
 
 **Hypothesis:** Training a Soft Critic on "Hard" execution results (Pass/Fail) will allow it to generalize and improve code generation on unseen problems via Rejection Sampling.
 
 
 
-
-
-
-
 **Execution:**
-
-
 
 1.  **Generator:** `Qwen2.5-Coder-1.5B-Instruct` (vLLM).
 
-
-
 2.  **Data:** Generated 8,150 solutions for MBPP Train.
-
-
 
 3.  **Labeling:** Executed all solutions against unit tests (Hard Verification). Pass Rate: 63.19%.
 
-
-
 4.  **Training:** Trained a Critic (Qwen-1.5B initialized) on `(Prompt, Code) -> Pass/Fail`.
-
-
 
     *   Epoch 3 Val Accuracy: **88.83%**.
 
-
-
 5.  **Evaluation (Extrapolation):**
 
-
-
     *   Generated 50 samples per problem for MBPP Test (Held-out).
-
-
 
     *   Ranked samples using the trained Critic.
 
 
-
-
-
-
-
 **Results:**
 
-
-
 | Metric | Value |
-
-
-
 |:-------|:------|
-
-
-
 | **Baseline Pass@1** (Random) | 60.94% |
-
-
-
 | **Critic Pass@1** (Top-1) | **66.93%** |
-
-
-
 | **Oracle Pass@N** (Upper Bound) | 90.27% |
-
-
-
 | **Improvement** | **+5.98%** |
-
-
-
-
 
 
 
 **Conclusion:**
 
 
-
-
-
-
-
 **Hard Verification Drives Extrapolation.**
-
-
-
-
 
 
 
 Just as "Digital Restoration" stabilized the Neural CPU, "Execution-Based Training" stabilized the Code Generator.
 
 
-
-
-
-
-
 A small model (1.5B) improved its own performance by ~6% absolute simply by learning to verify itself against Ground Truth execution.
 
 
-
-
-
-
-
 This validates the Fractal/Ouroboros thesis: **Verification is the key to scaling reasoning.**
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -370,55 +271,15 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 1.  **Hardening (Phase 14.6):** Failed.
-
-
-
-
-
 
 
     *   Mined 680 "Hard Negatives" (Confidently Wrong) from training set.
 
 
-
-
-
-
-
     *   Retraining degraded performance (66.9% -> 65.7%).
 
-
-
-
-
-
-
     *   *Lesson:* Forcing the model to memorize ambiguous/confusing samples hurts the general decision boundary.
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -426,64 +287,13 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
     *   Applied the **MBPP-trained Critic** to **HumanEval** (Zero-Shot).
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     *   **Baseline Pass@1:** 64.62%
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     *   **Critic Pass@1:** 68.29% (**+3.67%**)
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     *   *Result:* The Soft Verifier learned general code correctness principles, not just MBPP shortcuts.
@@ -491,61 +301,7 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -554,143 +310,23 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 **Objective:** Close the loop. Train the Generator to maximize the Execution Reward directly using GRPO.
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
 **Method:**
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 *   **Algorithm:** GRPO (Group Relative Policy Optimization).
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 *   **Reward:** Hard Execution (Pass=1, Fail=0).
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 *   **Compute:** H100 80GB.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 *   **Config:** Batch=8 sequences, Epochs=5.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -698,190 +334,10 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 | Model | Pass@1 (Greedy) | Improvement |
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 |:------|:----------------|:------------|
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 | **Baseline Qwen-1.5B** | 58.37% | - |
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 | **GRPO-Trained (Ep 5)** | **60.70%** | **+2.33%** |
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -891,125 +347,7 @@ This validates the Fractal/Ouroboros thesis: **Verification is the key to scalin
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 We combined the **GRPO-Tuned Generator** with the **Rebuilt Clean Critic**.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1018,191 +356,11 @@ We combined the **GRPO-Tuned Generator** with the **Rebuilt Clean Critic**.
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 *   **Baseline:** 58.37%
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 *   **Grand Unification:** **64.98%**
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1213,252 +371,11 @@ We combined the **GRPO-Tuned Generator** with the **Rebuilt Clean Critic**.
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 **Conclusion:**
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 The combined system (Generator + Verifier) outperforms the base model by ~6.6%.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1470,184 +387,117 @@ This is a robust, replicable gain that confirms the "System 2" thesis: verificat
 
 
 
+---
 
 
 
 
+## Phase 16: Flash Flood Decoder (Vector 1)
 
+**Objective:** Validate "Flash Flood" parallel decoding speedup on synthetic data.
+**Method:** Compare sequential AR decoding vs. parallel discrete diffusion decoding.
+**Result:** **42x Speedup** (550 tok/s vs 13 tok/s) on local hardware. 
+**Conclusion:** Parallel decoding offers massive throughput gains for structured outputs.
 
+---
 
+## Phase 17: Hierarchical Editing (Vector 7)
 
+**Objective:** Test stability of edits in Fractal vs Standard Transformers.
+**Method:** "Butterfly Effect" test - change 1 token in input, measure change in output.
+**Result:**
+*   **Standard AR:** 0% Stability (changes propagate globally).
+*   **Fractal Editor:** **100% Stability** (Surgical edits possible).
+**Conclusion:** Hierarchical/Fractal representations enable stable, localized repairs.
 
+---
 
+## Phase 18: Fractal Coder (Integration)
 
+**Objective:** Build a "Self-Healing" loop using Flash Flood + Editing.
+**Method:** Render -> Execute -> If Fail, Mutate Root -> Re-render (Flash Flood) -> Retry.
+**Result:** System functioned mechanically. Latency was low (~0.01s). However, **Random Mutation** search strategy was inefficient (failed to converge often).
+**Conclusion:** Infrastructure works, but needs a Brain (Critic) to guide the mutation.
 
+---
 
+## Phase 19 & 19.5: Fractal Critic (Vector 3)
 
+**Objective:** Train a Critic to guide the Fractal Coder's repair loop.
+**Method:**
+*   **Phase 19:** Critic predicts *Location* of bug. Heuristic mutation. (Success: 54% vs 22% Random).
+*   **Phase 19.5:** Full Policy (Location + Mutation).
+**Result:** **74% Success Rate** in repair loop vs 26% Random.
+**Conclusion:** Learned guidance significantly accelerates the repair loop.
 
+---
 
+## Phase 21: Fractal Coder v2 (Scale)
 
+**Objective:** Scale "Sketch-then-Fill" architecture to Qwen-2.5-Coder.
+**Method:** Use Qwen to generate high-level "Roots" (Comments/Pseudocode), then expand to Code.
+**Result:** Successfully implemented the pipeline.
 
+---
 
+## Phase 22: Fractal Repair (HumanEval)
 
+**Objective:** Test "Plan-Level Repair" on real-world bugs (HumanEval).
+**Method:** Generate Sketch -> Code. If fail, refine Sketch -> Code.
+**Result:** **0% Success** on the "Hard 5" problems.
+**Analysis:** "Planning harder" doesn't fix algorithmic ignorance. The model didn't know the underlying math/logic, so refining the plan just produced different wrong plans.
+**Conclusion:** Plan-level repair is not a silver bullet for logic gaps.
 
+---
 
+## Phase 23: Flash Flood Diversity
 
+**Objective:** Test if "Fractal Sampling" (Diverse Sketches) yields better coverage than "Baseline Sampling" (High-Temp Code).
+**Method:** Compare Pass@k for N=50 Sketches vs N=50 Code samples.
+**Result:** **Baseline Won** (Avg Pass@1: 61% vs 39%).
+**Analysis:** Low-temp code generation from diverse sketches collapsed the diversity. High-temp code sampling explores the solution space better.
 
+---
 
+## Phase 24: Fractal Critic (Selection)
 
+**Objective:** Test if a "Step-by-Step Analysis" Critic selects better solutions than a "Direct Score" Critic.
+**Result:** **Negative.** Baseline Critic (83% acc) slightly outperformed Fractal Critic (75% acc).
+**Analysis:** If the model misunderstands the requirement, its "step-by-step analysis" just hallucinates compliance.
 
+---
 
+## Phase 25: Fractal Generalization
 
+**Objective:** Test if Shared-Weight (Recurrent) Transformers generalize to unseen depths better than Standard Transformers.
+**Task:** Dyck-N Bracket Matching (Train Depths 1-6, Test 7-14).
+**Result:** **Negative.** Both models achieved 100% ID, but 0% OOD.
+**Conclusion:** Computation != Memory. Looping weights adds processing steps but not working memory/stack capacity.
 
+---
 
+## Phase 26: Flash Flood Scale
 
+**Objective:** Benchmark raw throughput of Parallel Decoding on A100.
+**Method:** Simulated 10-step parallel refinement vs AR generation.
+**Result:** **94x Speedup** (3736 TPS vs 39 TPS) at 2048 tokens.
+**Conclusion:** The speed hypothesis is validated. $O(1)$ decoding is orders of magnitude faster.
 
+---
 
+## Phase 27: Fractal Flood (Latency)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+**Objective:** Benchmark "Sketch + Flood" pipeline latency.
+**Result:** **5-8x Speedup** (including Sketch overhead).
+**Conclusion:** Sketching adds overhead but the system remains significantly faster than pure AR.
+
+---
+
+## Phase 28 & 29: Fractal Quality & Init (The Pivot)
+
+**Objective:** Prove that Parallel Decoding (Flash Flood) can converge to high quality using "Sketch Initialization".
+**Method:** Jacobi Decoding on Qwen-1.5B.
+**Result (Phase 28):** Naive Jacobi = Linear Wavefront (No speedup).
+**Result (Phase 29):** Sketch Init (50% Correct) -> **Collapse.** Step 2 accuracy dropped from 22% to 6%.
+**Root Cause:** **Causal Masking.** In a Causal LLM, an error at token $i$ invalidates all future tokens $i+k$, destroying the "Islands of Correctness" provided by the Sketch.
+**Final Conclusion:** Flash Flood (Parallel Decoding) **requires Bidirectional Attention** (like BERT/Diffusion). It cannot be effectively bolted onto Causal LLMs via prompting.
