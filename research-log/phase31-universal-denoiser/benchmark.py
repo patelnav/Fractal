@@ -21,7 +21,7 @@ from typing import Dict, Tuple
 from model import UniversalDenoiser, Config
 from data import EvalDataset
 from mutations import corrupt_sequence, mask_sequence
-from inference import generate, repair, edit
+from inference import generate, generate_maskgit, repair, edit
 
 
 def load_model(checkpoint_path: str, device: str) -> Tuple[UniversalDenoiser, dict]:
@@ -66,6 +66,9 @@ def benchmark_generation(
     num_samples: int = 100,
     K_steps: int = 5,
     device: str = 'cpu',
+    use_maskgit: bool = True,
+    maskgit_steps: int = 12,
+    maskgit_schedule: str = 'cosine',
 ) -> Dict[str, float]:
     """
     Benchmark generation mode.
@@ -80,6 +83,7 @@ def benchmark_generation(
         'has_equals': 0,
         'has_ops': 0,
         'total': num_samples,
+        'method': 'maskgit' if use_maskgit else 'naive',
     }
 
     vocab = eval_ds.stoi
@@ -90,17 +94,31 @@ def benchmark_generation(
         length = (target != eval_ds.pad_id).sum().item()
 
         # Generate
-        gen = generate(
-            model,
-            length=length,
-            mask_token_id=eval_ds.mask_id,
-            pad_token_id=eval_ds.pad_id,
-            bos_token_id=eval_ds.bos_id,
-            eos_token_id=eval_ds.eos_id,
-            K_steps=K_steps,
-            temperature=0.0,
-            device=device,
-        )
+        if use_maskgit:
+            gen = generate_maskgit(
+                model,
+                length=length,
+                mask_token_id=eval_ds.mask_id,
+                pad_token_id=eval_ds.pad_id,
+                bos_token_id=eval_ds.bos_id,
+                eos_token_id=eval_ds.eos_id,
+                num_steps=maskgit_steps,
+                temperature=0.0,
+                schedule=maskgit_schedule,
+                device=device,
+            )
+        else:
+            gen = generate(
+                model,
+                length=length,
+                mask_token_id=eval_ds.mask_id,
+                pad_token_id=eval_ds.pad_id,
+                bos_token_id=eval_ds.bos_id,
+                eos_token_id=eval_ds.eos_id,
+                K_steps=K_steps,
+                temperature=0.0,
+                device=device,
+            )
 
         # Check syntax
         if is_valid_syntax(gen, vocab):
@@ -267,6 +285,9 @@ def run_full_benchmark(
     model: UniversalDenoiser,
     device: str = 'cpu',
     num_samples: int = 100,
+    use_maskgit: bool = True,
+    maskgit_steps: int = 12,
+    maskgit_schedule: str = 'cosine',
 ) -> Dict[str, Dict]:
     """Run all benchmarks."""
     eval_ds = EvalDataset(num_samples=num_samples * 2, seed=42)
@@ -276,10 +297,12 @@ def run_full_benchmark(
     print("=" * 60)
 
     # Generation
-    print("\n1. GENERATION BENCHMARK")
+    method = "MaskGIT" if use_maskgit else "Naive"
+    print(f"\n1. GENERATION BENCHMARK ({method}, {maskgit_steps} steps, {maskgit_schedule})")
     print("-" * 40)
     gen_results = benchmark_generation(
-        model, eval_ds, num_samples=num_samples, K_steps=5, device=device
+        model, eval_ds, num_samples=num_samples, K_steps=5, device=device,
+        use_maskgit=use_maskgit, maskgit_steps=maskgit_steps, maskgit_schedule=maskgit_schedule,
     )
     print(f"  Syntax Valid: {gen_results['syntax_valid_rate']:.1%}")
     print(f"  Has Equals:   {gen_results['has_equals_rate']:.1%}")
@@ -336,6 +359,15 @@ def main():
     parser.add_argument('--num_samples', type=int, default=100,
                         help='Number of samples per benchmark')
     parser.add_argument('--device', type=str, default='auto')
+    parser.add_argument('--use_maskgit', action='store_true', default=True,
+                        help='Use MaskGIT-style generation (default: True)')
+    parser.add_argument('--no_maskgit', action='store_true',
+                        help='Disable MaskGIT (use naive generation)')
+    parser.add_argument('--maskgit_steps', type=int, default=12,
+                        help='Number of MaskGIT unmasking steps')
+    parser.add_argument('--maskgit_schedule', type=str, default='cosine',
+                        choices=['linear', 'cosine'],
+                        help='MaskGIT unmasking schedule')
     args = parser.parse_args()
 
     # Device
@@ -350,8 +382,15 @@ def main():
     model, checkpoint = load_model(args.checkpoint, device)
     print(f"Model loaded (iter {checkpoint.get('iter_num', '?')}, loss {checkpoint.get('loss', '?'):.4f})")
 
+    # MaskGIT settings
+    use_maskgit = not args.no_maskgit
+
     # Run benchmarks
-    results = run_full_benchmark(model, device=device, num_samples=args.num_samples)
+    results = run_full_benchmark(
+        model, device=device, num_samples=args.num_samples,
+        use_maskgit=use_maskgit, maskgit_steps=args.maskgit_steps,
+        maskgit_schedule=args.maskgit_schedule,
+    )
 
     return results
 

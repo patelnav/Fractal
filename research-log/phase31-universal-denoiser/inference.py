@@ -313,6 +313,202 @@ def iterative_refinement(
     return x, trajectory
 
 
+def generate_maskgit(
+    model: UniversalDenoiser,
+    length: int,
+    mask_token_id: int,
+    pad_token_id: int,
+    bos_token_id: int,
+    eos_token_id: int,
+    num_steps: int = 12,
+    temperature: float = 1.0,
+    schedule: str = 'cosine',  # 'linear', 'cosine'
+    device: str = 'cpu',
+) -> torch.Tensor:
+    """
+    MaskGIT-style progressive unmasking generation.
+
+    Instead of refining all positions at once, we:
+    1. Start from full MASK
+    2. At each step, unmask only the highest-confidence positions
+    3. Keep unmasked positions as anchors for subsequent steps
+
+    This creates structural anchors progressively, avoiding the
+    "no bootstrap" problem of naive parallel generation.
+
+    Args:
+        model: Trained UniversalDenoiser
+        length: Target sequence length (including BOS/EOS)
+        mask_token_id: ID of <MASK> token
+        pad_token_id: ID of <PAD> token
+        bos_token_id: ID of <BOS> token
+        eos_token_id: ID of <EOS> token
+        num_steps: Number of unmasking steps
+        temperature: Sampling temperature (0 = argmax)
+        schedule: Unmasking schedule ('linear' or 'cosine')
+        device: Device to run on
+
+    Returns:
+        Generated sequence (length,)
+    """
+    import math
+    model.eval()
+
+    with torch.no_grad():
+        # Initialize: BOS + MASKs + EOS
+        x = torch.full((1, length), mask_token_id, dtype=torch.long, device=device)
+        x[0, 0] = bos_token_id
+        x[0, -1] = eos_token_id
+
+        # Track which positions are still masked (exclude BOS/EOS)
+        # Positions 1 to length-2 are maskable
+        maskable_positions = torch.zeros(length, dtype=torch.bool, device=device)
+        maskable_positions[1:length-1] = True
+        num_maskable = maskable_positions.sum().item()
+
+        # Current mask state: True = still masked
+        is_masked = maskable_positions.clone()
+
+        for step in range(num_steps):
+            # Compute how many to unmask this step
+            if schedule == 'linear':
+                # Linear: unmask equal fraction each step
+                target_unmasked = int((step + 1) / num_steps * num_maskable)
+            else:  # cosine
+                # Cosine: more unmasking early, less later
+                # ratio = 1 - cos(pi * (step+1) / (2 * num_steps))
+                ratio = 1 - math.cos(math.pi * (step + 1) / (2 * num_steps))
+                target_unmasked = int(ratio * num_maskable)
+
+            current_unmasked = (~is_masked & maskable_positions).sum().item()
+            to_unmask = max(1, target_unmasked - current_unmasked)
+
+            # Only proceed if there are masked positions left
+            num_currently_masked = is_masked.sum().item()
+            if num_currently_masked == 0:
+                break
+
+            to_unmask = min(to_unmask, num_currently_masked)
+
+            # Get model predictions
+            # Sigma decreases as we unmask (less noise = more confident context)
+            sigma = torch.tensor([1.0 - step / num_steps], device=device)
+            logits, _ = model(x, sigma, K_iter=2)
+
+            # Compute confidence for each position (max probability)
+            probs = F.softmax(logits / max(temperature, 0.1), dim=-1)
+            confidence = probs.max(dim=-1).values.squeeze(0)  # (length,)
+
+            # Only consider currently masked positions
+            confidence[~is_masked] = -float('inf')
+
+            # Select top-k highest confidence masked positions
+            _, top_indices = confidence.topk(to_unmask)
+
+            # Get predictions for those positions
+            if temperature <= 0:
+                predictions = logits.argmax(dim=-1).squeeze(0)
+            else:
+                sampled = torch.multinomial(probs.squeeze(0), 1).squeeze(-1)
+                predictions = sampled
+
+            # Unmask selected positions
+            x[0, top_indices] = predictions[top_indices]
+            is_masked[top_indices] = False
+
+        # Final pass: fill any remaining masked positions
+        if is_masked.any():
+            sigma = torch.tensor([0.1], device=device)
+            logits, _ = model(x, sigma, K_iter=2)
+            if temperature <= 0:
+                final_pred = logits.argmax(dim=-1).squeeze(0)
+            else:
+                probs = F.softmax(logits / temperature, dim=-1)
+                final_pred = torch.multinomial(probs.squeeze(0), 1).squeeze(-1)
+            x[0, is_masked] = final_pred[is_masked]
+
+    return x.squeeze(0)
+
+
+def generate_maskgit_batch(
+    model: UniversalDenoiser,
+    batch_size: int,
+    length: int,
+    mask_token_id: int,
+    pad_token_id: int,
+    bos_token_id: int,
+    eos_token_id: int,
+    num_steps: int = 12,
+    temperature: float = 1.0,
+    schedule: str = 'cosine',
+    device: str = 'cpu',
+) -> torch.Tensor:
+    """Batched MaskGIT-style generation."""
+    import math
+    model.eval()
+
+    with torch.no_grad():
+        x = torch.full((batch_size, length), mask_token_id, dtype=torch.long, device=device)
+        x[:, 0] = bos_token_id
+        x[:, -1] = eos_token_id
+
+        # Track masks per sample
+        maskable_positions = torch.zeros(length, dtype=torch.bool, device=device)
+        maskable_positions[1:length-1] = True
+        num_maskable = maskable_positions.sum().item()
+
+        is_masked = maskable_positions.unsqueeze(0).expand(batch_size, -1).clone()
+
+        for step in range(num_steps):
+            if schedule == 'linear':
+                target_unmasked = int((step + 1) / num_steps * num_maskable)
+            else:  # cosine
+                ratio = 1 - math.cos(math.pi * (step + 1) / (2 * num_steps))
+                target_unmasked = int(ratio * num_maskable)
+
+            sigma = torch.full((batch_size,), 1.0 - step / num_steps, device=device)
+            logits, _ = model(x, sigma, K_iter=2)
+            probs = F.softmax(logits / max(temperature, 0.1), dim=-1)
+            confidence = probs.max(dim=-1).values  # (B, T)
+
+            # Process each sample
+            for b in range(batch_size):
+                current_unmasked = (~is_masked[b] & maskable_positions).sum().item()
+                to_unmask = max(1, target_unmasked - current_unmasked)
+                num_currently_masked = is_masked[b].sum().item()
+                if num_currently_masked == 0:
+                    continue
+                to_unmask = min(to_unmask, num_currently_masked)
+
+                conf_b = confidence[b].clone()
+                conf_b[~is_masked[b]] = -float('inf')
+                _, top_indices = conf_b.topk(to_unmask)
+
+                if temperature <= 0:
+                    pred_b = logits[b].argmax(dim=-1)
+                else:
+                    pred_b = torch.multinomial(probs[b], 1).squeeze(-1)
+
+                x[b, top_indices] = pred_b[top_indices]
+                is_masked[b, top_indices] = False
+
+        # Final pass
+        remaining = is_masked.any(dim=1)
+        if remaining.any():
+            sigma = torch.full((batch_size,), 0.1, device=device)
+            logits, _ = model(x, sigma, K_iter=2)
+            if temperature <= 0:
+                final_pred = logits.argmax(dim=-1)
+            else:
+                probs = F.softmax(logits / temperature, dim=-1)
+                final_pred = torch.stack([torch.multinomial(probs[b], 1).squeeze(-1) for b in range(batch_size)])
+            for b in range(batch_size):
+                if is_masked[b].any():
+                    x[b, is_masked[b]] = final_pred[b, is_masked[b]]
+
+    return x
+
+
 if __name__ == "__main__":
     # Quick test
     from model import Config

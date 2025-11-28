@@ -15,9 +15,10 @@
 
 | Task | Metric | Result | Target | Status |
 |------|--------|--------|--------|--------|
-| **Generation** | Syntax valid | 29% | >85% | FAIL |
+| **Generation** | Syntax valid (MaskGIT) | 46% | >85% | Partial |
 | **Repair** | Mean accuracy | 84.7% | >90% | CLOSE |
 | **Editing** | Anchor stability | 100% | 100% | **PASS** |
+| **Energy** | ROC-AUC | 96.3% | >95% | **PASS** |
 
 ## Key Findings
 
@@ -82,25 +83,112 @@ This is analogous to Phase 28-29's "wavefront of error" finding, but in a differ
 
 Phase 31 adds repair and editing capabilities while maintaining the anchor-preservation property.
 
-## Next Steps
+## MaskGIT Experiment (Update)
 
-### Option A: Fix Generation with MaskGIT-style Decoding
+After the initial results, we implemented MaskGIT-style progressive unmasking.
 
-Instead of refining all positions simultaneously:
-1. Start from full MASK
-2. At each step, only fill highest-confidence positions
-3. Keep filled positions anchored for next step
-4. Repeat until all filled
+### MaskGIT Approach
 
-This "confidence-based unmasking" is how MaskGIT achieves good generation quality.
+Instead of refining all positions at once:
+1. Start from full MASK (except BOS/EOS)
+2. Get model predictions for all positions
+3. Select **highest-confidence** masked positions
+4. Unmask only those (anchor them)
+5. Repeat with decreasing mask ratio
 
-### Option B: Train with More Full-Mask Samples
+Schedule: cosine (unmask more early, less later)
 
-Increase σ_max from 0.9 to 1.0 and sample more heavily from the high-noise regime to improve the model's ability to generate from scratch.
+### MaskGIT Results
 
-### Option C: Two-Stage Generation
+| Steps | Schedule | Syntax Valid | Has Equals |
+|-------|----------|--------------|------------|
+| 5 (naive) | - | 29% | 0% |
+| 12 | cosine | 37% | 21% |
+| 20 | cosine | **46%** | **28%** |
+| 20 | linear | 44% | 28% |
+| 30 | cosine | 42% | 28% |
 
-Use a small causal LM to generate the first few tokens (establishing structure), then switch to bidirectional refinement.
+**Best config:** 20 steps, cosine schedule → **46% syntax valid** (1.6x improvement over naive)
+
+### Why Generation Still Struggles
+
+Examining generated samples revealed:
+- **Short sequences work well** (e.g., "10=", "(+12)")
+- **Long sequences collapse into repetition** ("00000000", "11111111")
+- **Complex nesting loses balance**
+
+Root cause: **Training distribution mismatch**. The model was trained with σ ∈ [0.1, 0.9], meaning it rarely saw full-mask inputs. MaskGIT helps but can't fully compensate.
+
+### Implication for Full Generation
+
+To achieve >85% generation quality would require either:
+1. **Retrain with σ_max = 1.0** and heavier sampling from high-noise regime
+2. **Hybrid approach**: Causal LM generates initial structure → bidirectional refines
+
+For now, we accept:
+- **Generation:** 46% (partial success, needs training fix)
+- **Repair:** 85% (close to target)
+- **Editing:** 100% (pass)
+
+### Updated Summary Table
+
+| Mode | Naive | MaskGIT | Target | Status |
+|------|-------|---------|--------|--------|
+| Generation | 29% | 46% | >85% | Partial |
+| Repair | 85% | 85% | >90% | Close |
+| Editing | 100% | 100% | 100% | **PASS** |
+
+---
+
+## Stage 2: Energy Head Training
+
+Following the staged training approach from PLAN_PHASE31.md:
+1. **Stage 1:** Train bidirectional denoiser (reconstruction only) ✓
+2. **Stage 2:** Freeze trunk, add energy head ✓
+
+### Energy Head Architecture
+
+```python
+EnergyHead(
+    Linear(128 → 64) + GELU +
+    Linear(64 → 64) + GELU +
+    Linear(64 → 1)
+)
+# Trainable params: 12,481 (vs 438K total)
+```
+
+The energy head learns to distinguish:
+- **Clean sequences** → low energy (label=0)
+- **Corrupted sequences** → high energy (label=1)
+
+### Training
+
+```
+Denoiser: Frozen (loaded from best.pt, iter 2000, loss 1.19)
+Data: 10,000 samples (50% clean, 50% corrupted at σ ∈ [0.2, 0.6])
+Training: 1000 iterations, batch size 64, lr 1e-3
+```
+
+### Results
+
+| Metric | Result | Target | Status |
+|--------|--------|--------|--------|
+| Training Accuracy | 93.5% | - | - |
+| Training Loss | 0.1915 | - | - |
+| **ROC-AUC** | **0.9632** | >0.95 | **PASS** |
+
+The energy head successfully distinguishes valid from corrupted sequences on a held-out test set (500 clean + 500 corrupted samples).
+
+### Implications
+
+The energy head can be used for:
+1. **Rejection sampling**: Generate multiple candidates, select lowest energy
+2. **Guided refinement**: Use energy gradient to steer denoising
+3. **Validation**: Flag potentially invalid outputs before deployment
+
+This validates the contrastive energy training pattern from Phase 14, applied to the denoising context.
+
+---
 
 ## Conclusion
 
@@ -114,10 +202,13 @@ The key insight is that bidirectional attention is excellent for **refinement** 
 
 ## Files
 
-- `checkpoints/best.pt`: Best model (loss 1.19)
-- `checkpoints/final.pt`: Final model after 2000 iterations
+- `checkpoints/best.pt`: Best denoiser model (loss 1.19)
+- `checkpoints/final.pt`: Final denoiser model after 2000 iterations
+- `checkpoints/energy_model.pt`: Energy head model (ROC-AUC 0.9632)
 - Training log: `/tmp/phase31_train.txt`
+- Energy training log: `/tmp/phase31_energy_train.txt`
 - Benchmark log: `/tmp/phase31_benchmark.txt`
+- Energy benchmark log: `/tmp/phase31_energy_benchmark.txt`
 
 ## Training Configuration
 

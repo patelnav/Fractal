@@ -215,6 +215,124 @@ class UniversalDenoiser(nn.Module):
         return x
 
 
+class EnergyHead(nn.Module):
+    """
+    Energy head for validity scoring.
+
+    Takes pooled hidden states and outputs a scalar energy score.
+    Low energy = valid/clean, High energy = invalid/corrupted.
+    """
+
+    def __init__(self, n_embd: int, hidden_dim: int = None):
+        super().__init__()
+        hidden_dim = hidden_dim or n_embd // 2
+
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, hidden: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Args:
+            hidden: (B, T, n_embd) hidden states
+            mask: (B, T) boolean mask of valid (non-pad) positions
+
+        Returns:
+            energy: (B,) energy scores
+        """
+        # Pool over sequence (mean of non-pad positions)
+        if mask is not None:
+            # Masked mean pooling
+            mask_expanded = mask.unsqueeze(-1).float()  # (B, T, 1)
+            pooled = (hidden * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1)
+        else:
+            pooled = hidden.mean(dim=1)  # (B, n_embd)
+
+        energy = self.net(pooled).squeeze(-1)  # (B,)
+        return energy
+
+
+class UniversalDenoiserWithEnergy(nn.Module):
+    """
+    Universal Denoiser with Energy Head for validity scoring.
+
+    Stage 2: Adds energy head on top of frozen denoiser trunk.
+    """
+
+    def __init__(self, config, pretrained_denoiser: UniversalDenoiser = None):
+        super().__init__()
+        self.config = config
+
+        # Load pretrained denoiser or create new
+        if pretrained_denoiser is not None:
+            self.denoiser = pretrained_denoiser
+        else:
+            self.denoiser = UniversalDenoiser(config)
+
+        # Energy head
+        self.energy_head = EnergyHead(config.n_embd)
+
+    def freeze_denoiser(self):
+        """Freeze denoiser parameters for energy head training."""
+        for param in self.denoiser.parameters():
+            param.requires_grad = False
+
+    def unfreeze_denoiser(self):
+        """Unfreeze denoiser for joint fine-tuning."""
+        for param in self.denoiser.parameters():
+            param.requires_grad = True
+
+    def forward(self, idx, sigma, targets=None, K_iter=1, return_energy=False):
+        """
+        Forward pass with optional energy computation.
+
+        Args:
+            idx: (B, T) input tokens
+            sigma: (B,) noise levels
+            targets: (B, T) target tokens (optional)
+            K_iter: recurrence iterations
+            return_energy: whether to compute energy
+
+        Returns:
+            logits: (B, T, vocab_size)
+            loss: reconstruction loss (if targets provided)
+            energy: (B,) energy scores (if return_energy=True)
+        """
+        # Get hidden states
+        hidden = self.denoiser.get_hidden(idx, sigma, K_iter)
+
+        # Logits
+        logits = self.denoiser.lm_head(hidden)
+
+        # Loss
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index=-1
+            )
+
+        # Energy
+        energy = None
+        if return_energy:
+            # Mask out PAD tokens (assuming PAD=0)
+            mask = idx != 0
+            energy = self.energy_head(hidden, mask)
+
+        return logits, loss, energy
+
+    def compute_energy(self, idx, sigma, K_iter=1):
+        """Compute energy score only."""
+        hidden = self.denoiser.get_hidden(idx, sigma, K_iter)
+        mask = idx != 0
+        return self.energy_head(hidden, mask)
+
+
 class Config:
     """Model configuration."""
     n_layer = 2          # Number of blocks (for recurrence, use 1-2)
