@@ -501,3 +501,21 @@ This is a robust, replicable gain that confirms the "System 2" thesis: verificat
 **Result (Phase 29):** Sketch Init (50% Correct) -> **Collapse.** Step 2 accuracy dropped from 22% to 6%.
 **Root Cause:** **Causal Masking.** In a Causal LLM, an error at token $i$ invalidates all future tokens $i+k$, destroying the "Islands of Correctness" provided by the Sketch.
 **Final Conclusion:** Flash Flood (Parallel Decoding) **requires Bidirectional Attention** (like BERT/Diffusion). It cannot be effectively bolted onto Causal LLMs via prompting.
+
+---
+
+## Phase 30: Bidirectional Flash Flood Prototype
+
+**Objective:** Test whether a small bidirectional diffusion‑style model can preserve "Islands of Correctness" and perform parallel fill‑in on a recursive arithmetic language, in contrast to the causal failures from Phases 28–29.
+
+**Method:**  
+- Domain: Parenthesized arithmetic expressions such as `(+ 5 (* 2 3)) = 11`.  
+- Models: 4‑layer bidirectional transformer (no causal mask, trained with masked‑language‑modeling) vs a causal baseline (next‑token prediction).  
+- Inference: Parallel refinement (Gibbs‑style) for the bidirectional model vs parallel Jacobi decoding for the causal model, starting from partially masked sequences.
+
+**Results:**  
+- Structural stability: With expressions like `(+ (* <MASK> 2) (* <MASK> 3)) = <MASK><MASK>`, the bidirectional model preserved the global structure and operators and filled in plausible operands and results; the causal model collapsed into ungrammatical "parenthesis soup".  
+- Quantitatively, over 5 refinement steps the bidirectional model maintained **≈80.6% structural token accuracy**, while the causal model collapsed from ≈74% init to ≈19% at step 1 and ≈10% by step 5.  
+- On simple expressions (e.g., `(* 3 4) = <MASK><MASK>`), the bidirectional model recovered the exact numeric result in a single step; on more complex ones it often produced structurally correct but numerically imperfect outputs ("math off, syntax valid").
+
+**Conclusion:** Bidirectional diffusion‑style decoders can preserve and exploit "Islands of Correctness" under parallel refinement, unlike causal decoders. This supports the claim that the Flash Flood phase of a future "Fractal Computer" must be bidirectional, even if causal models remain useful as planners.
