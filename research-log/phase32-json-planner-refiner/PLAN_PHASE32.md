@@ -1,165 +1,158 @@
-# Phase 32: JSON Planner-Refiner
+# Phase 32: JSON Repair Engine
 
 ## Objective
 
-Apply the validated **AR Planner + Bidirectional Refiner + Energy Critic** architecture to JSON/YAML configuration generation.
+Build a **practical, high-accuracy JSON repair tool** powered by the Phase 31 bidirectional denoiser + energy head.
 
-This directly tests the Phase 31 conclusion: bidirectional models are excellent refiners but cannot generate structure from scratch. The AR planner provides the structural skeleton; the bidirectional refiner fills values and supports edits.
+Given a large, broken JSON file (missing comma, quote, brace, etc.), the system should automatically:
+1. Localize the error,
+2. Propose a **minimal, structurally valid repair**,
+3. Preserve all untouched regions byte-for-byte.
 
----
-
-## Architecture
-
-```
-AR Planner          →  Bidirectional Refiner  →  Energy Critic
-(generates skeleton)   (fills values)            (scores validity)
-```
-
-### 1. AR Planner (Skeleton Generator)
-- **Input:** Natural language spec or empty prompt
-- **Output:** JSON skeleton with `<VALUE>` placeholders
-- **Vocab:** `{`, `}`, `[`, `]`, `:`, `,`, `"`, `<KEY>`, `<VALUE>`, whitespace, common keys
-- **Architecture:** Small causal transformer (2-4 layers)
-- **Example output:**
-  ```json
-  {"<KEY>": <VALUE>, "<KEY>": [<VALUE>, <VALUE>]}
-  ```
-
-### 2. Bidirectional Refiner (Value Filler)
-- **Input:** Skeleton from planner
-- **Output:** Complete JSON with actual values
-- **Architecture:** Bidirectional transformer (reuse Phase 31 UniversalDenoiser)
-- **Training:** Masked denoising on (skeleton, complete) pairs
-- **Example:**
-  ```json
-  {"name": "config", "ports": [8080, 443]}
-  ```
-
-### 3. Energy Critic
-- **Scoring dimensions:**
-  - Parse validity (JSON.parse succeeds)
-  - Schema conformance (if schema provided)
-  - Simple constraint checks (types, ranges)
-- **Architecture:** Same as Phase 31 energy head
-- **Training:** Contrastive on (valid, invalid) JSON pairs
+This is the first “real-world” deployment of the **Universal Refiner + Critic** pattern.
 
 ---
 
-## Data
+## Core Hypothesis
 
-### Synthetic JSON Generator
-Generate diverse JSON configs with:
-- Nested objects (depth 1-4)
-- Arrays (0-10 elements)
-- Value types: strings, numbers, booleans, null
-- Key patterns: camelCase, snake_case, common config keys
+> A bidirectional denoiser trained on (corrupted_json, clean_json) pairs, plus a small energy head, can repair real-world JSON errors with **>95% parse success** while changing **only a tiny local region** around the error.
+
+More concretely:
+- Denoiser handles the **local structural repair**.
+- Energy head helps reject obviously bad repairs.
+- A parser in the loop provides a hard correctness check.
+
+If this fails even on JSON, the “refiner as structural repair oracle” story is in trouble; if it works, it’s a strong practical validation.
+
+---
+
+## Architecture & Flow
+
+High-level loop for a single JSON file:
+
+1. **Error localization (parser layer)**
+   - Run a standard JSON parser (e.g., `json` / `orjson` / `jsonc`).
+   - On failure, capture the error position (line, column, char offset).
+   - Define a **window** around that position (e.g., ±N tokens or characters).
+
+2. **Tokenization & masking**
+   - Tokenize the entire file into JSON tokens: `{`, `}`, `[`, `]`, `:`, `,`, string literals, numbers, booleans, `null`.
+   - Mark:
+     - Tokens **inside** the error window as editable.
+     - Tokens **outside** as anchors (must not change).
+   - Replace editable tokens with `<MASK>` before feeding to the denoiser.
+
+3. **Refinement (Phase 31-style editor)**
+   - Use a JSON-trained Universal Denoiser in **edit mode**:
+     - Input: full token sequence with masked window.
+     - At each refinement step:
+       - Predict all positions.
+       - Re-anchor non-masked tokens (outside the window + special tokens).
+   - After K steps (2–5), decode tokens back to JSON text.
+
+4. **Validation & iteration**
+   - Try parsing the repaired JSON:
+     - If parse succeeds: **accept** (optionally also run schema checks).
+     - If parse fails: use the new error location to define a fresh window and repeat (cap attempts).
+   - Optional: generate a small **beam** of repairs for a given window and:
+     - Filter by parse success.
+     - Rank by energy score or minimal edit distance.
+
+5. **Output**
+   - Emit the repaired JSON plus a diff (original vs repaired) for inspection.
+
+---
+
+## Data & Training
+
+### JSON Corpus
+
+- Collect a diverse corpus of valid JSON:
+  - Open-source config files (Kubernetes manifests, package.json, tsconfig, etc.).
+  - Synthetic configs from a simple JSON generator (nested objects/arrays, mixed types).
+- Normalize to a maximum size (e.g., 2–8 KB per sample) for training; real files can be larger at inference via sliding windows.
 
 ### Corruption Engine
-- Swap values between keys
-- Remove/add commas, brackets
-- Type mutations (string→number, etc.)
-- Truncation
 
-### Dataset Size
-- Training: 50K samples
-- Validation: 5K samples
-- Test: 2K samples
+For each clean JSON sample, generate one or more corrupted versions:
 
----
+- **Structural errors:**
+  - Delete or insert commas, colons, braces, brackets, quotes.
+  - Swap adjacent tokens.
+  - Truncate strings or arrays.
+- **Non-structural but valid “noise”:**
+  - Change a value’s type (string ↔ number ↔ boolean).
+  - Randomly perturb numbers or booleans.
 
-## Evaluation Metrics
+Produce triples `(clean_tokens, corrupted_tokens, sigma)` just like Phase 31, but:
+- Bias σ toward **local corruption** (e.g., 5–20% tokens in a window).
+- Avoid full-mask; we’re explicitly in the “repair/edit” regime, not generation from scratch.
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| Parse Valid | JSON.parse succeeds | >95% |
-| Schema Valid | Matches expected schema | >90% |
-| Exact Match | Skeleton→values matches ground truth | >70% |
-| Edit Stability | Anchor preservation on local edits | 100% |
-| Repair Accuracy | Fix corrupted JSON | >85% |
+### Denoiser & Energy Head
 
----
-
-## Stages
-
-### Stage 1: Data Pipeline (Local)
-- [ ] Implement JSON generator with configurable complexity
-- [ ] Implement skeleton extractor (JSON → skeleton with placeholders)
-- [ ] Implement corruption engine
-- [ ] Generate train/val/test splits
-- [ ] Verify data quality
-
-### Stage 2: AR Planner (Cloud GPU)
-- [ ] Define skeleton vocabulary
-- [ ] Train small causal model to generate skeletons
-- [ ] Benchmark skeleton validity rate
-- **Gate:** >90% valid skeletons or debug
-
-### Stage 3: Bidirectional Refiner (Cloud GPU)
-- [ ] Adapt Phase 31 UniversalDenoiser for JSON
-- [ ] Train on (skeleton, complete) pairs
-- [ ] Benchmark generation quality
-- **Gate:** >85% parse valid or debug
-
-### Stage 4: Energy Critic (Cloud GPU)
-- [ ] Generate contrastive pairs (valid, invalid)
-- [ ] Train energy head
-- [ ] Benchmark discrimination (ROC-AUC)
-- **Gate:** >90% ROC-AUC or debug
-
-### Stage 5: Integration & Benchmark
-- [ ] Wire up full pipeline: Planner → Refiner → Critic
-- [ ] Benchmark end-to-end generation
-- [ ] Benchmark editing (anchor stability)
-- [ ] Benchmark repair
-- [ ] Compare to baseline (pure AR, pure MaskGIT)
+- **Denoiser**: copy Phase 31 UniversalDenoiser architecture, but:
+  - JSON-specific vocab and tokenizer.
+  - Training only on repair-style corruption (no full-mask generation objective).
+- **Energy head**:
+  - Positives: clean JSON + “successful repairs” (parse OK, small edit distance).
+  - Negatives: synthetically corrupted JSON and failed repair attempts.
+  - Train with contrastive/BCE loss to score “valid-looking” sequences low, broken ones high.
 
 ---
 
-## Success Criteria
+## Evaluation & Success Criteria
 
-**Phase 32 succeeds if:**
-1. End-to-end JSON generation achieves >90% parse valid (vs Phase 31's 57% on arithmetic)
-2. Editing preserves anchors at 100%
-3. Repair achieves >85% accuracy
-4. The Planner→Refiner split demonstrably outperforms pure bidirectional
+On a held-out test set of corrupted JSON files:
 
-**Phase 32 fails if:**
-- AR planner cannot generate valid skeletons (>90%)
-- Even with valid skeletons, refiner cannot fill values (>85% parse valid)
+1. **Primary metrics**
+   - `ParseSuccess@1`: fraction of files that parse after a single repair run.
+   - `ParseSuccess@K`: with up to K localized repair iterations (e.g., K=3).
+   - `Locality`: fraction of tokens outside a fixed-radius window around the original error that remain unchanged (target ≈100%).
+   - `EditSize`: average number of tokens changed (should be small).
 
----
+2. **Secondary metrics**
+   - `Energy ROC-AUC`: valid vs corrupted (target >0.95).
+   - `Time per repair`: wall-clock vs baseline heuristics (e.g., “just delete offending char” or “try common fix patterns”).
 
-## Files to Create
+3. **Baselines**
+   - Simple heuristic fixer:
+     - Try inserting/removing a comma/brace at the error location.
+     - Re-parse; accept first success.
+   - “LLM rewrite” baseline:
+     - Prompt a strong code model to “fix this JSON” and compare:
+       - Parse success.
+       - Amount of unrelated change (often large).
 
-```
-phase32-json-planner-refiner/
-├── PLAN_PHASE32.md          # This file
-├── RESULTS.md               # Findings
-├── data_json.py             # JSON generator, skeleton extractor, corruption
-├── model_planner.py         # AR skeleton planner
-├── model_refiner.py         # Bidirectional refiner (adapt from Phase 31)
-├── model_energy.py          # Energy critic for JSON
-├── train_planner.py         # Train skeleton generator
-├── train_refiner.py         # Train value filler
-├── train_energy.py          # Train energy head
-├── inference_pipeline.py    # Full Planner→Refiner→Critic pipeline
-├── benchmark.py             # Evaluation suite
-└── run_*.sh                 # Execution scripts
-```
+**Success for Phase 32 (JSON Repair Engine):**
+
+- `ParseSuccess@1 ≥ 90%` on realistic corruptions, and `ParseSuccess@K ≥ 95%` for K≤3.
+- ≥99.5% of tokens outside a ±W token window around the error are unchanged.
+- Energy head ROC-AUC ≥ 0.95 on valid vs invalid JSON.
+- Clear win vs heuristic + LLM baselines on locality and reliability.
 
 ---
 
-## Relationship to Prior Work
+## Deliverables
 
-- **Phase 31:** Proved bidirectional denoiser is refiner, not generator → motivates AR planner
-- **Phase 6:** Manager + Renderer split → same architecture, new domain
-- **Phase 4:** Energy head for verification → reuse pattern
-- **Vector 6:** Path toward code (JSON is stepping stone)
+- `phase32-json-repair/`
+  - `PLAN_PHASE32.md` (this document)
+  - `data_json.py` (corpus loader + corruption)
+  - `tokenizer_json.py` (JSON tokenizer)
+  - `model_denoiser.py` (JSON UniversalDenoiser)
+  - `model_energy.py` (energy head)
+  - `train_denoiser.py` (Stage 1)
+  - `train_energy.py` (Stage 2)
+  - `inference_repair.py` (repair loop: parser → window → edit → parse)
+  - `benchmark.py` (metrics + baselines)
+  - `RESULTS.md` (final numbers + qualitative examples)
+- Optional:
+  - `json_repair_cli.py`: simple CLI: `json-repair broken.json > fixed.json`.
+  - Example VS Code / editor integration note.
 
 ---
 
-## Next After Phase 32
+## Relationship to Existing Phases
 
-If successful:
-- **Phase 33:** Same pattern on small Python functions with execution-based evaluation
-- Reuse planner/refiner/critic architecture, just change domain and energy function
+- **Phase 31**: Provided the core **refiner + energy head** pattern and proved it works for arithmetic repair/editing.
+- **Phase 22 (Fractal Repair) / 17 (Hierarchical Edit)**: JSON repair is a concrete, high-value instance of those ideas.
+- **Vectors 1 & 7**: This is an early, practical manifestation of “Fractal Editor / Hierarchical Editing,” but in a simpler, single-level domain (JSON trees).
