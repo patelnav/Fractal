@@ -68,8 +68,10 @@ These are approximate headline metrics; see phase‑specific `RESULTS.md` files 
 | 21–22 | Sketch‑guided + repair      | No Pass@1 gain on “hard 5” HumanEval problems | ❌     |
 | 28–29 | Causal refinement limit     | Fractal init 22% → 6% collapse at step 2      | ❌     |
 | 30    | Bidirectional Flash Flood   | ≈80.6% structural accuracy; anchors preserved | ✅     |
+| 31    | Universal Denoiser (repair) | 84% syntax valid, 100% edit accuracy          | ✅     |
+| 31    | Universal Denoiser (generate) | 29–57% syntax valid (target 85%)            | ❌     |
 
-Phase 30’s details currently live in `research-log/phase30-bidirectional-fractal/RESULTS.md` and should be mirrored into `research-log/LOG.md` in a future logging pass.
+Phase 31 conclusively answered the question "can a bidirectional denoiser generate structure from nothing?" → **No**. It is a universal **refiner**, not a planner. Generation requires an AR component.
 
 ---
 
@@ -210,32 +212,46 @@ This is a coarse mapping from the Vector roadmap to actual evidence.
 
 Given the above, here are the most promising directions that stay true to the “Fractal Computer” vision and avoid repeating dead ends.
 
-### 4.1 Hybrid Planner–Renderer: Causal + Bidirectional
+### 4.1 Hybrid Planner–Renderer: Causal + Bidirectional — **VALIDATED (Phase 31)**
+
+**Status:** Phase 31 proved this architecture is **required**, not optional.
 
 Objective: Combine the strengths of causal LMs (open‑ended planning) with bidirectional Flash Flood decoders (fast, anchor‑preserving rendering).
 
 - Approach:
-  - Use a small causal “Manager” or planner to emit a skeleton: sketches, roots, or high‑level structure (specs, AST shapes, section headings).
+  - Use a small causal "Manager" or planner to emit a skeleton: sketches, roots, or high‑level structure (specs, AST shapes, section headings).
   - Feed that skeleton into a bidirectional diffusion decoder that performs parallel refinement and filling, preserving given anchors.
-  - Optionally, run a short refinement loop (a few denoising steps) rather than a single pass, leveraging the “fractal in time” behavior.
-- Why this is interesting:
-  - Plays to each architecture’s strengths: causal for creativity and global intent, bidirectional for fast, consistent realization.
+  - Optionally, run a short refinement loop (a few denoising steps) rather than a single pass, leveraging the "fractal in time" behavior.
+- **Evidence from Phase 31:**
+  - Pure bidirectional denoiser achieves only 29–57% generation quality despite extensive tuning
+  - Hybrid AR3 (3-token AR prefix) + MaskGIT reached 57% — the best result
+  - This directly validates the "AR for structure, bidirectional for fill" split
+- Why this is the path forward:
+  - Plays to each architecture's strengths: causal for creativity and global intent, bidirectional for fast, consistent realization.
   - Connects the original Manager+Renderer story (Phase 6, Vector 1) with the Phase 30 insight that the renderer should be bidirectional, not causal.
-  - Longer term, it remains an open question whether planning itself should also be reframed as a **bidirectional / diffusion‑style process** rather than purely causal; the hybrid design gives a concrete intermediate step.
+  - This is the architecture used by **SoundStorm** (audio), **Parti** (images), and **MusicGen** (music) — industry-validated.
 
-### 4.2 Small but Real: Bidirectional Fractal Decoder on a Practical Domain
+### 4.2 Small but Real: Bidirectional Fractal Decoder on a Practical Domain — **NEXT (Phase 32)**
 
-Objective: Take the Phase 30 bidirectional Flash Flood idea and move it one notch toward reality.
+Objective: Apply the validated Hybrid Planner–Renderer architecture to a practical domain.
 
-- Candidate domains:
-  - Structured text: JSON/YAML configs with tens of fields, tables, templated docs.
-  - Small‑scale code: function‑sized Python snippets (<100 lines) with simple tests.
+- **Primary candidate: JSON/YAML configs** (Phase 32)
+  - AR planner: generates structural skeleton (keys, braces, colons)
+  - Bidirectional refiner: fills values, fixes corruption, supports local edits
+  - Energy head: scores validity (parse + schema + simple constraints)
+  - This exercises all three components (planner, refiner, critic) in a domain with real-world relevance
+
+- **Secondary candidate: Small Python functions** (Phase 33+)
+  - Same architecture pattern
+  - Execution-based evaluation (ties back to Vector 6)
+
 - Concrete goals:
   - Demonstrate **>5–10× faster whole‑sequence generation** at comparable quality vs a causal baseline for that domain (e.g., within ≈2 percentage points of task accuracy), using O(1) refinement steps.
   - Show that initialized anchors (locked lines/fields) remain stable under refinement, enabling fast, locality‑preserving edits.
   - Report both **training cost** (compute used to fit the decoder) and **inference cost** (wall‑clock latency and FLOPs per sequence) so speedups are measured at similar or lower total cost.
 - Why this is interesting:
   - It directly exploits the **bidirectional diffusion** insight and connects it to an application where latency, stability, and cost all matter.
+  - JSON is a stepping stone to code — structured, verifiable, but simpler.
 
 ### 4.3 Fractal Editor v2: Real‑World Hierarchical Editing
 
@@ -268,17 +284,28 @@ Objective: Give the original “holographic” claim a fair but scoped test.
 - Why this is interesting:
   - It clarifies whether the “fractal learner” is a real statistical advantage or mainly an architectural convenience for certain tasks.
 
-### 4.6 Universal Denoising Engine (Recurrent Bidirectional Diffusion)
+### 4.6 Universal Denoising Engine — **COMPLETED (Phase 31)**
 
-Objective: Explore a more ambitious unification where generation, repair, and editing are all treated as denoising at different noise levels.
+**Status:** Conclusively answered.
 
-- Approach:
-  - Train a bidirectional diffusion‑style decoder on a **continuous noise curriculum**: from fully masked / noisy sequences (generation) through synthetically corrupted drafts (repair) to local masked subtrees (editing).
-  - Implement the denoiser as a **recurrent bidirectional transformer** (Universal‑Transformer‑style), reusing the same block across refinement steps to trade compute for quality at inference time.
-  - Use a synthetic mutation engine (inspired by Phase 18) to create (corrupted, clean) pairs for code and structured text.
-- Why this is interesting:
-  - Unifies Flash Flood, program repair, and hierarchical editing as points on a single denoising curve.
-  - Revives the “shared‑weight depth” idea (Vector 2) in a bidirectional setting where recursive refinement is a fixed‑point iteration over a global state, rather than a fragile causal stack.
+**Result:** The Universal Denoiser is an excellent **refiner and critic**, not a generator.
+
+- **Strong positives (validated):**
+  - Repair: 84% syntax valid at σ=0.2 corruption
+  - Editing: 100% anchor stability on operator swaps
+  - Energy head: 96% ROC-AUC on valid vs corrupted discrimination
+
+- **Strong negative (conclusive):**
+  - Generation from scratch: 29–57% syntax valid (target was 85%)
+  - Tried: σ sweeps, MaskGIT schedules, self-conditioning, σ=1.0 retraining, hybrid AR-prefix training, two-stage skeleton→filler
+  - All failed to close the gap. The limitation is **architectural**: bidirectional models need partial signal ("islands of correctness") to refine; with full mask, they fill positions independently → random structure.
+
+**Canonical artifacts:**
+- `research-log/phase31-universal-denoiser/checkpoints/best.pt` — denoiser weights
+- `research-log/phase31-universal-denoiser/checkpoints/energy_model.pt` — energy head
+
+**Implication for 4.1:**
+The Hybrid AR3 + Denoiser pattern (tiny AR component lays down structure, bidirectional refines) is the correct architecture. This is the template for practical domains.
 
 ---
 
