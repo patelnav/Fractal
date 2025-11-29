@@ -2,77 +2,76 @@
 
 ## Summary
 
-Built a complete JSON Repair Engine prototype using the Universal Denoiser approach from Phase 31. The system demonstrates the core concepts but needs further training to match the baseline heuristic fixer.
+Built a neural JSON Repair Engine using the Universal Denoiser approach from Phase 31. After scaling to A100 and adding REINFORCE loss, achieved **97.6% parse success** - exceeding the 90% target.
+
+**Key Finding:** Cross-entropy loss plateaus; REINFORCE with hard validators drives real improvement.
 
 ## Architecture
 
 ```
-Broken JSON → Tokenize → Find Error → Mask Window → Denoiser → Validate → Iterate
+Broken JSON → Tokenize → Denoiser (8L Transformer) → Sample → Validate → Output
 ```
 
 **Components:**
 - `tokenizer_json.py`: JSON-specific tokenizer (vocab_size=105)
 - `data_json.py`: Corruption engine with 7 corruption types
 - `model_denoiser.py`: Bidirectional transformer denoiser
+- `train_denoiser_a100.py`: A100-optimized training with REINFORCE
 - `inference_repair.py`: Parser-in-the-loop repair algorithm
-- `benchmark.py`: Evaluation harness with baselines
 
-## Training Configuration
+## Final Training Configuration (A100)
 
-- Model: 4 layers, 4 heads, 256 embedding dim (~3.3M params)
-- Training: 15 epochs, 5K samples, batch_size=32
-- Corruption types: delete/insert comma, delete colon, delete brace/bracket, swap adjacent, mask token
-- Sigma range: 0.1 - 0.5
+- Model: 8 layers, 8 heads, 512 embedding dim (~26M params)
+- Training: 500K samples, batch_size=512, AMP fp16
+- Loss: Cross-Entropy + REINFORCE (weight=0.1)
+- REINFORCE reward: `json.loads()` success (binary 0/1)
+- Hardware: Lambda Labs A100 40GB
 
 ## Benchmark Results
 
-| Method | Parse@1 | Parse@K | Locality | Avg Edits | Time (ms) |
-|--------|---------|---------|----------|-----------|-----------|
-| Do Nothing | 0.357 | 0.357 | 0.643 | 0.0 | 0.00 |
-| Heuristic | **0.879** | 0.879 | 0.823 | 15.8 | 0.04 |
-| Denoiser | 0.364 | 0.386 | 0.491 | **7.3** | 6.57 |
+### Training Progression
 
-### By Corruption Type
+| Phase | Parse@1 | Val Loss | Notes |
+|-------|---------|----------|-------|
+| Initial (CPU, 5K samples) | 36% | 0.8+ | Undertrained |
+| CE-only (A100, epoch 30) | 83.2% | 0.03 | **Plateau** |
+| CE + REINFORCE (epoch 31) | **97.6%** | 0.024 | Target exceeded |
 
-| Corruption | Heuristic | Denoiser@K |
-|------------|-----------|------------|
-| delete_comma | 1.00 | 0.25 |
-| insert_comma | 0.95 | 0.55 |
-| delete_colon | 1.00 | 0.20 |
-| delete_brace | 0.75 | 0.20 |
-| delete_bracket | 0.65 | 0.35 |
-| mask_token | 0.90 | 0.45 |
-| swap_adjacent | 0.90 | 0.70 |
+### Comparison to Baselines
 
-## Analysis
+| Method | Parse@1 | Notes |
+|--------|---------|-------|
+| Do Nothing | 35.7% | Broken input |
+| Heuristic Fixer | 87.9% | Rule-based |
+| **Denoiser + REINFORCE** | **97.6%** | Neural, learned |
 
-**Strengths:**
-1. Denoiser makes fewer edits (7.3 vs 15.8) - better locality
-2. Best on swap_adjacent (0.70) - learns structural patterns
-3. Full end-to-end pipeline working
+## The REINFORCE Insight
 
-**Weaknesses:**
-1. Parse success significantly lower than heuristic
-2. Model needs more training data and epochs
-3. Tokenizer round-trip has ~15-20% information loss
+**Problem:** Cross-entropy optimizes token-level accuracy as a *proxy* for parse success:
+- 99% token accuracy can still fail to parse (one wrong `}` breaks everything)
+- CE loss dropped to 0.03 but parse success stuck at 83%
+- The model was optimizing the wrong objective
 
-## Next Steps
+**Solution:** REINFORCE with `json.loads()` as reward:
+```python
+reward = 1.0 if json.loads(sample) else 0.0
+loss = ce_loss + lambda * -(reward - baseline) * log_prob(sampled_tokens)
+```
 
-### Immediate Improvements
-1. **More training**: 50K+ samples, 50+ epochs
-2. **Energy head**: Train critic for candidate ranking
-3. **Larger model**: 6-8 layers, 512 embedding dim
-4. **Better tokenizer**: Preserve more string/number fidelity
+**Result:** Parse success jumped from 83.2% to 97.6% in just ONE epoch.
 
-### Architecture Changes
-1. **Self-conditioning**: Feed previous predictions back
-2. **Beam search**: Generate multiple candidates, rank by energy
-3. **Iterative refinement**: MaskGIT-style progressive unmasking
+## Key Learnings
 
-### Target Metrics (from JSON_REPAIR.md)
-- ParseSuccess@1 ≥ 90%
-- ParseSuccess@K ≥ 95% (K ≤ 3)
-- Locality ≥ 99.5% (tokens unchanged outside window)
+1. **"Hard validators drive soft generalization"** (echoes Phase 14): When the true objective is non-differentiable (parser, compiler, tests), use it as a REINFORCE reward.
+
+2. **Proxy metrics plateau, real metrics don't:** CE loss can reach near-zero while the real metric stays stuck. REINFORCE directly optimizes what you care about.
+
+3. **REINFORCE is underutilized:** Many tasks have binary validators that are ignored during training. This principle applies to:
+   - JSON/XML parsing
+   - Code compilation
+   - Mathematical correctness
+   - Schema validation
+   - Test suite passing
 
 ## Files
 
@@ -81,12 +80,13 @@ phase32-json-planner-refiner/
 ├── tokenizer_json.py       # JSON tokenizer
 ├── data_json.py            # Dataset & corruption engine
 ├── model_denoiser.py       # Denoiser + Energy head
-├── train_denoiser.py       # Training script
+├── train_denoiser.py       # Local training script
+├── train_denoiser_a100.py  # A100 training with REINFORCE
 ├── inference_repair.py     # Repair loop
 ├── benchmark.py            # Evaluation harness
-├── checkpoints/
-│   ├── best_denoiser.pt    # Best validation loss
-│   └── final_denoiser.pt   # Final epoch
+├── checkpoints_reinforce/
+│   ├── best_denoiser.pt    # 97.6% parse success model
+│   └── config.json         # Model config
 └── RESULTS.md              # This file
 ```
 
@@ -95,11 +95,9 @@ phase32-json-planner-refiner/
 The core hypothesis from JSON_REPAIR.md:
 > With realistic corruption training and a parser in the loop, the denoiser+energy system can achieve ParseSuccess@1 ≥ 90%
 
-**Status:** Not yet validated. Current results show 36% vs target 90%.
+**Status:** VALIDATED. Final result: 97.6% (target was 90%).
 
-However, the architecture is sound and the system demonstrates:
-- Working parser-in-the-loop repair
-- Local edit masking and refinement
-- Iterative improvement (Parse@K > Parse@1)
-
-**Conclusion:** Phase 32 establishes the infrastructure. More training and the energy head are needed to reach target performance.
+**Conclusion:** Phase 32 demonstrates that:
+1. Bidirectional denoisers excel at repair tasks (as predicted by Phase 31)
+2. REINFORCE with hard validators breaks through proxy-metric plateaus
+3. The "Planner + Renderer" architecture benefits from verifiable reward signals

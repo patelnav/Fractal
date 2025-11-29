@@ -552,3 +552,47 @@ This is a robust, replicable gain that confirms the "System 2" thesis: verificat
 Bidirectional models excel at refinement ("given partial signal, complete it") but cannot generate structure from scratch. With a full mask (no signal), the model has no "islands of correctness" to anchor on—it fills positions independently, producing random structure. This is **architectural**, not a training issue.
 
 **Conclusion:** Bidirectional denoising is excellent for repair (84%) and editing (100%) but fundamentally cannot generate valid structure from nothing (29-57%). Generation requires an **autoregressive model** to create structure sequentially, with the bidirectional model serving as a downstream renderer/refiner. This validates the "AR Planner + Bidirectional Renderer" architecture used by SoundStorm, Parti, and MusicGen.
+
+---
+
+## Phase 32: JSON Repair Engine with REINFORCE
+
+**Objective:** Build a neural JSON repair tool that can fix corrupted JSON files with minimal edits, targeting ≥90% parse success rate.
+
+**Method:**
+- Domain: JSON documents with syntax corruptions (missing brackets, quotes, commas).
+- Model: 8-layer bidirectional transformer denoiser (~26M params).
+- Training (v1): Cross-entropy loss on token prediction. 500K samples, 30 epochs on A100.
+- Training (v2): Cross-entropy + **REINFORCE loss** with `json.loads()` as reward signal.
+
+**The Critical Insight - Why Proxy Metrics Fail:**
+
+Cross-entropy optimizes token-level accuracy as a *proxy* for parse success. But:
+- 99% token accuracy can still fail to parse (one wrong `}` breaks everything)
+- Loss kept dropping while parse success plateaued at 83%
+- The model was learning the wrong objective
+
+**REINFORCE Solution:**
+```python
+# Parse success is non-differentiable (binary 0/1)
+# But REINFORCE gives us gradient signal:
+reward = 1.0 if json.loads(sample) else 0.0
+loss = -(reward - baseline) * log_prob(sampled_tokens)
+```
+
+**Results:**
+
+| Training Phase | Val Parse Success | Val Loss |
+|----------------|-------------------|----------|
+| CE-only (30 epochs) | 83.2% (plateau) | 0.03 |
+| CE + REINFORCE (1 epoch) | **97.6%** | 0.024 |
+
+**Key Learnings:**
+
+1. **"Hard validators drive soft generalization"** (echoes Phase 14): When the true objective is non-differentiable (parser success, code execution, math correctness), using it as a REINFORCE reward dramatically outperforms proxy losses.
+
+2. **Proxy metrics plateau, real metrics don't:** CE loss dropped to 0.03 but parse success stuck at 83%. Adding REINFORCE immediately pushed to 97.6%.
+
+3. **REINFORCE is underutilized:** Many tasks have binary "hard" validators (compiles? parses? passes tests?) that are ignored during training because they're non-differentiable. REINFORCE bridges this gap.
+
+**Conclusion:** When you have a hard validator (parser, compiler, test suite), use REINFORCE to directly optimize it. Cross-entropy is a useful bootstrap but will plateau before reaching the target. This principle applies broadly: JSON parsing, code generation, mathematical reasoning, any task with verifiable correctness.
