@@ -1,0 +1,36 @@
+{
+  "model": {
+    "vocab_size": 105,
+    "n_layer": 8,
+    "n_head": 8,
+    "n_embd": 512,
+    "dropout": 0.1,
+    "block_size": 256,
+    "bias": false,
+    "use_self_cond": false
+  },
+  "training": {
+    "epochs": 100,
+    "batch_size": 512,
+    "accumulation_steps": 1,
+    "lr": 0.001,
+    "warmup_epochs": 5,
+    "weight_decay": 0.1,
+    "reinforce_weight": 0.1,
+    "reinforce_start_epoch": 1,
+    "n_layer": 8,
+    "n_head": 8,
+    "n_embd": 512,
+    "max_len": 256,
+    "dropout": 0.1,
+    "train_samples": 500000,
+    "val_samples": 5000,
+    "num_workers": 8,
+    "device": "cuda",
+    "save_path": "research-log/phase32-json-planner-refiner/checkpoints_reinforce",
+    "seed": 42,
+    "no_amp": false,
+    "compile": true,
+    "resume": "research-log/phase32-json-planner-refiner/checkpoints_a100/checkpoint_epoch30.pt"
+  }
+}

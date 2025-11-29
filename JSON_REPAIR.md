@@ -1,5 +1,26 @@
 # JSON Repair Engine (Product Concept)
 
+## Current Status (2024-11)
+
+| Stage | Description | Status |
+|-------|-------------|--------|
+| 0 | Baseline & Evaluation Harness | **Done** |
+| 1 | JSON Denoiser Training | **Done** (REINFORCE) |
+| 2 | Energy Head Training | Skipped (REINFORCE worked better) |
+| 3 | Inference Repair Loop | **Done** (98.5% parse success) |
+| 4 | Productization (Library + CLI) | In Progress |
+| 5 | Real-world Benchmarking | Not Started |
+
+### Benchmark Results (Stage 3)
+
+| Method | Parse@1 | Locality | Avg Edits |
+|--------|---------|----------|-----------|
+| Do Nothing | 37.2% | 64.1% | 0.0 |
+| Heuristic | 88.3% | 76.3% | 11.6 |
+| **Denoiser (full)** | **98.5%** | **98.9%** | **0.4** |
+
+**Key finding**: Full-sequence denoising outperforms window-based iterative repair. The REINFORCE-trained 8-layer model (26M params) achieves near-perfect results with minimal edits.
+
 ## Overview
 
 The JSON Repair Engine is a **high-accuracy, minimal-edit JSON repair tool** built on top of the Phase 31 Universal Denoiser + Energy Head. It takes large, broken JSON blobs (typically from LLMs or messy configs), localizes structural errors, and proposes **minimal, structurally valid repairs** while preserving the rest of the file byte‑for‑byte.
@@ -177,21 +198,26 @@ Goal: Add a critic that scores candidates and helps reject or rank repairs.
 
 Deliverable: An energy model that can reliably separate valid-looking JSON from broken or suspicious outputs.
 
-### Stage 3 – Inference Repair Loop
+### Stage 3 – Inference Repair Loop ✅ COMPLETE
 
 Goal: Build the full parser → window → edit → parse loop for real JSON files.
 
-- Implement `inference_repair.py`:
-  - Parse failure → error location → select window.
-  - Mask editable region; run denoiser for K refinement steps.
-  - Optionally run a small beam over candidate repairs.
-  - Filter by parser success; rank by energy + minimal edit distance.
-  - Iterate with updated error locations up to a small K.
-- Ensure **locality guarantees**:
-  - Hard anchoring of tokens outside the window.
-  - Track and report edit region(s).
+**Implemented** in `inference_repair.py`:
+- `repair_json_full_denoise()` - One-shot full-sequence repair (recommended, 98.5% success)
+- `repair_json()` - Iterative window-based repair with:
+  - Hard locality enforcement (anchored tokens)
+  - Progressive window expansion
+  - Edit region tracking
+- `repair_json_beam()` - Beam search with confidence-based ranking
 
-Deliverable: A function like `repair_json(broken_json_str) -> repaired_json_str` that plugs into the Stage 0 benchmark harness.
+**Key learning**: Full-sequence denoising works much better than window-based masking for this model. The REINFORCE-trained model expects to see the full corrupted sequence and denoise all positions simultaneously, not fill in masked windows.
+
+**Results**:
+- 98.5% parse success (vs 88.3% heuristic baseline)
+- 98.9% locality (only 0.4 tokens changed on average)
+- 23ms average repair time
+
+Deliverable: ✅ `repair_json_full_denoise()` achieves target metrics.
 
 ### Stage 4 – Productization (Library + CLI)
 

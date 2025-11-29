@@ -23,7 +23,7 @@ import torch
 from tokenizer_json import JSONTokenizer
 from data_json import JSONRepairDataset, JSONEvalDataset, generate_random_json, JSONCorruptionEngine
 from model_denoiser import JSONDenoiser, JSONDenoiserWithEnergy, JSONDenoiserConfig
-from inference_repair import repair_json, RepairResult, get_parse_error_position
+from inference_repair import repair_json, repair_json_full_denoise, RepairResult, get_parse_error_position
 
 
 @dataclass
@@ -195,12 +195,169 @@ def benchmark_method(
     )
 
 
+def benchmark_denoiser_direct(
+    model: JSONDenoiser,
+    tokenizer: JSONTokenizer,
+    num_samples: int = 200,
+    device: str = 'cpu',
+    max_len: int = 256,
+    seed: int = 42,
+) -> BenchmarkResult:
+    """
+    Benchmark denoiser using direct token pipeline (no re-tokenization).
+
+    This avoids the double-tokenization issue in the string-based benchmark.
+    """
+    import torch
+    from data_json import JSONEvalDataset
+
+    parse_success = 0
+    total_locality = 0.0
+    total_edits = 0
+    total_time = 0.0
+    by_corruption = defaultdict(lambda: {'success': 0, 'total': 0, 'edits': []})
+
+    eval_dataset = JSONEvalDataset(num_samples=num_samples, max_len=max_len, seed=seed)
+
+    for i in range(len(eval_dataset)):
+        clean, corrupted, sigma, ctype = eval_dataset[i]
+
+        start = time.time()
+
+        with torch.no_grad():
+            input_t = corrupted.unsqueeze(0).to(device)
+            sigma_t = sigma.unsqueeze(0).to(device)
+            logits, _ = model(input_t, sigma_t)
+            pred = logits.argmax(dim=-1)
+
+        elapsed = (time.time() - start) * 1000
+        total_time += elapsed
+
+        pred_json = tokenizer.detokenize(pred[0].tolist())
+
+        try:
+            json.loads(pred_json)
+            parse_success += 1
+            by_corruption[ctype]['success'] += 1
+        except json.JSONDecodeError:
+            pass
+
+        by_corruption[ctype]['total'] += 1
+
+        # Token-level metrics
+        mask = clean != 0
+        edits = ((pred[0].cpu() != clean) & mask).sum().item()
+        total_edits += edits
+        by_corruption[ctype]['edits'].append(edits)
+
+        # Locality
+        preserved = ((pred[0].cpu() == clean) & mask).sum().item()
+        total_clean = mask.sum().item()
+        locality = preserved / total_clean if total_clean > 0 else 1.0
+        total_locality += locality
+
+    n = len(eval_dataset)
+
+    by_corruption_summary = {}
+    for ctype, metrics in by_corruption.items():
+        by_corruption_summary[ctype] = {
+            'parse_success': metrics['success'] / metrics['total'] if metrics['total'] > 0 else 0,
+            'avg_edits': sum(metrics['edits']) / len(metrics['edits']) if metrics['edits'] else 0,
+        }
+
+    return BenchmarkResult(
+        name='Denoiser-Direct',
+        parse_success_1=parse_success / n,
+        parse_success_k=parse_success / n,
+        locality=total_locality / n,
+        avg_edits=total_edits / n,
+        avg_time_ms=total_time / n,
+        by_corruption=by_corruption_summary,
+    )
+
+
+def benchmark_denoiser_full(
+    model: JSONDenoiser,
+    tokenizer: JSONTokenizer,
+    test_samples: List[Tuple[str, str, str]],
+    device: str = 'cpu',
+    max_len: int = 128,
+) -> BenchmarkResult:
+    """
+    Benchmark the denoiser model using full-sequence denoising (string-based).
+
+    Note: This uses a string-based pipeline which may have lower accuracy than
+    benchmark_denoiser_direct due to tokenization round-trip issues.
+    """
+    parse_success = 0
+    total_locality = 0.0
+    total_edits = 0
+    total_time = 0.0
+    by_corruption = defaultdict(lambda: {'success': 0, 'total': 0, 'edits': []})
+
+    for clean_json, corrupted_json, ctype in test_samples:
+        start = time.time()
+        result = repair_json_full_denoise(
+            model=model,
+            tokenizer=tokenizer,
+            broken_json=corrupted_json,
+            sigma=0.2,
+            device=device,
+            max_len=max_len,
+        )
+        elapsed = (time.time() - start) * 1000
+
+        total_time += elapsed
+
+        if result.success:
+            parse_success += 1
+            by_corruption[ctype]['success'] += 1
+
+        by_corruption[ctype]['total'] += 1
+
+        # Edit distance
+        total_edits += result.tokens_changed
+        by_corruption[ctype]['edits'].append(result.tokens_changed)
+
+        # Locality
+        clean_ids = tokenizer.tokenize(clean_json)
+        repaired_ids = tokenizer.tokenize(result.repaired)
+        max_len_cmp = max(len(clean_ids), len(repaired_ids))
+        clean_ids = clean_ids + [0] * (max_len_cmp - len(clean_ids))
+        repaired_ids = repaired_ids + [0] * (max_len_cmp - len(repaired_ids))
+
+        preserved = sum(1 for a, b in zip(clean_ids, repaired_ids) if a == b and a != 0)
+        total_clean = sum(1 for a in clean_ids if a != 0)
+        locality = preserved / total_clean if total_clean > 0 else 1.0
+        total_locality += locality
+
+    n = len(test_samples)
+
+    by_corruption_summary = {}
+    for ctype, metrics in by_corruption.items():
+        by_corruption_summary[ctype] = {
+            'parse_success': metrics['success'] / metrics['total'] if metrics['total'] > 0 else 0,
+            'avg_edits': sum(metrics['edits']) / len(metrics['edits']) if metrics['edits'] else 0,
+        }
+
+    return BenchmarkResult(
+        name='Denoiser-Full',
+        parse_success_1=parse_success / n,
+        parse_success_k=parse_success / n,
+        locality=total_locality / n,
+        avg_edits=total_edits / n,
+        avg_time_ms=total_time / n,
+        by_corruption=by_corruption_summary,
+    )
+
+
 def benchmark_denoiser(
     model: JSONDenoiser,
     tokenizer: JSONTokenizer,
     test_samples: List[Tuple[str, str, str]],
     max_iterations: int = 3,
     device: str = 'cpu',
+    max_len: int = 128,
 ) -> BenchmarkResult:
     """
     Benchmark the denoiser model.
@@ -222,9 +379,10 @@ def benchmark_denoiser(
             tokenizer=tokenizer,
             broken_json=corrupted_json,
             max_iterations=1,
-            window_size=5,
+            initial_window_size=5,
             sigma=0.3,
             device=device,
+            max_len=max_len,
         )
         time_1 = (time.time() - start) * 1000
 
@@ -235,9 +393,10 @@ def benchmark_denoiser(
             tokenizer=tokenizer,
             broken_json=corrupted_json,
             max_iterations=max_iterations,
-            window_size=5,
+            initial_window_size=5,
             sigma=0.3,
             device=device,
+            max_len=max_len,
         )
         time_k = (time.time() - start) * 1000
 
@@ -378,18 +537,46 @@ def run_benchmark(
         print(f"Loading model from {model_path}...")
         checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         config = checkpoint['config']
+        max_len = config.block_size  # Use model's block_size as max_len
 
         model = JSONDenoiser(config).to(device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Handle torch.compile() prefix in state dict
+        state_dict = checkpoint['model_state_dict']
+        if any(k.startswith('_orig_mod.') for k in state_dict.keys()):
+            state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
+
+        model.load_state_dict(state_dict)
         model.eval()
 
-        print("Benchmarking: Denoiser...")
-        results['denoiser'] = benchmark_denoiser(
+        print(f"Model config: {config.n_layer} layers, {config.n_embd} dim, block_size={config.block_size}")
+
+        print("Benchmarking: Denoiser (direct - training pipeline)...")
+        results['denoiser_direct'] = benchmark_denoiser_direct(
+            model=model,
+            tokenizer=tokenizer,
+            num_samples=num_samples,
+            device=device,
+            max_len=max_len,
+        )
+
+        print("Benchmarking: Denoiser (full - string pipeline)...")
+        results['denoiser_full'] = benchmark_denoiser_full(
+            model=model,
+            tokenizer=tokenizer,
+            test_samples=samples,
+            device=device,
+            max_len=max_len,
+        )
+
+        print("Benchmarking: Denoiser (window - iterative)...")
+        results['denoiser_window'] = benchmark_denoiser(
             model=model,
             tokenizer=tokenizer,
             test_samples=samples,
             max_iterations=3,
             device=device,
+            max_len=max_len,
         )
 
     return results
