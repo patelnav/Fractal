@@ -101,3 +101,89 @@ The core hypothesis from JSON_REPAIR.md:
 1. Bidirectional denoisers excel at repair tasks (as predicted by Phase 31)
 2. REINFORCE with hard validators breaks through proxy-metric plateaus
 3. The "Planner + Renderer" architecture benefits from verifiable reward signals
+
+---
+
+## Competitor Benchmark
+
+Benchmarked our neural repair against popular heuristic JSON repair tools.
+
+### Competitors Tested
+
+| Tool | Language | Monthly Downloads |
+|------|----------|-------------------|
+| json-repair | Python | 9.2M |
+| fast-json-repair | Python/Rust | - |
+| jsonrepair | JavaScript | 2.9M/week |
+
+### Test Corpus
+
+87 test cases across 7 error categories:
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| structural | 6 | Missing/extra braces and brackets |
+| punctuation | 7 | Missing/extra commas and colons |
+| quotes | 6 | Single quotes, unquoted keys, smart quotes |
+| values | 6 | Python constants (`True`/`False`/`None`) |
+| llm_specific | 7 | Markdown fences, prose, comments |
+| multi_error | 5 | Multiple errors per document |
+| synthetic | 50 | Random corruption via our engine |
+
+### Results
+
+```
+Tool                     Parse%  Semantic%  Speed(ms)      Edits
+------------------------------------------------------------
+json-repair               98.9%      92.0%       0.02        4.2
+fast-json-repair         100.0%      74.7%       0.00       13.2
+jsonrepair-js             94.3%      86.2%      34.66        3.3
+Neural (ours)             70.1%      66.7%      21.35        6.1
+```
+
+### By Category
+
+```
+Category         json-repair  fast-json  jsonrepair-js  Neural
+---------------------------------------------------------------
+llm_specific          100.0%     100.0%         85.7%    85.7%
+multi_error           100.0%     100.0%        100.0%    40.0%
+punctuation           100.0%     100.0%         71.4%    85.7%
+quotes                100.0%     100.0%        100.0%    33.3%
+structural             83.3%     100.0%         66.7%    66.7%
+synthetic             100.0%     100.0%        100.0%    80.0%
+values                100.0%     100.0%        100.0%    16.7%
+```
+
+### Analysis
+
+**Why Neural Underperforms (70.1% vs 98.9%):**
+
+The neural model was trained on a narrow distribution:
+- ✅ Missing/extra commas, colons, brackets (punctuation class)
+- ❌ Python constants (`True`→`true`, `None`→`null`)
+- ❌ Quote normalization (single→double, smart→straight)
+- ❌ LLM artifacts (markdown fences, prose wrapping)
+- ❌ Multi-error documents
+
+**Key Weaknesses:**
+| Category | Neural % | Issue |
+|----------|----------|-------|
+| values | 16.7% | Never trained on constant normalization |
+| quotes | 33.3% | Never trained on quote handling |
+| multi_error | 40.0% | Trained on single-error only |
+
+**Speed:** Neural is ~10,000x slower (21ms vs 0.02ms) due to model inference overhead.
+
+### Conclusions
+
+1. **On training distribution:** Neural achieves 97.6% (excellent)
+2. **On production distribution:** Neural achieves 70.1% (poor)
+3. **Heuristics win for syntax repair:** json-repair's rule coverage handles all edge cases
+4. **Neural niche:** Semantic-level repair where context understanding matters
+
+### Recommendations
+
+1. **Expand training data:** Add Python constants, quote handling, LLM patterns
+2. **Hybrid approach:** Heuristic pre-processing + neural for structural issues
+3. **Target different problems:** Schema conformance, semantic repair, completion
