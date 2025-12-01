@@ -98,3 +98,11 @@ energy_wrong = energy_head(embed_pair(condition, wrong))     # → 1
 - Reproducibility: set `random.seed()` and `torch.manual_seed()`
 - **ALWAYS tee script output to `/tmp/`** and tell me where to tail it
 - **Use `uv` for package management**, keep `requirements.txt` updated
+
+## Feasibility Calibration
+
+- **Read `FEASIBILITY_CALIBRATION.md`** for calibrated possibility intuitions
+- Claude's training makes things *feel* impossible that are actually routine (Zone A)
+- Key question: "Is this blocked by iteration cost (collapses) or something irreducible (Zone C)?"
+- If something feels "too ambitious," ask: Zone A or Zone C blocker?
+- Strategy shift: Explore broadly, try multiple approaches—iteration is cheap
