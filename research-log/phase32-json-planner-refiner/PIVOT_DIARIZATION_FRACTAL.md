@@ -217,33 +217,69 @@ Refinement:
 
 ---
 
-## Recommended Path
+## Recommended Path (Recalibrated via Feasibility Zones)
 
-### Phase 1: Spike (2 weeks)
+### The Old (Wrong) Plan
+- "2-week spike to validate"
+- "Then decide whether to commit 3-6 months"
+- This is **Zone A thinking disguised as prudence**
 
-**Goal:** Test if bidirectional refinement can improve boundary accuracy
+### What's Actually Zone A vs Zone C
 
-**Approach:**
-1. Take 10-20 audio samples with ground truth boundaries
-2. Extract 2s windows around each boundary
-3. Train a small model to predict precise boundary location
-4. Measure: Can we improve from 0.58s → 0.2s error?
+| Blocker | Zone | Implication |
+|---------|------|-------------|
+| Implementation | A | "Build 5 variants" = 2-3 days total |
+| Trying architectures | A | "Compare approaches" = parallel, not serial |
+| GPU training | C | Irreducible, but can parallelize experiments |
+| ElevenLabs data moat | C | Can't compete on general audio scale |
+| Domain fine-tuning | A | YOUR architecture data might be enough |
 
-**Success criteria:** >50% reduction in boundary error on test set
+### The Real Strategy: 5-Day Sprint, 5+ Experiments
 
-**Failure mode:** Proceed to Option A (commodity + differentiation)
+| Day | Activity |
+|-----|----------|
+| **Day 1** | Build 4-5 boundary refinement variants in parallel: (1) MLP on embeddings, (2) Bidirectional transformer, (3) Diffusion-style iterative, (4) Contrastive loss, (5) Fine-tune existing diarizer |
+| **Day 2** | Finish implementations, set up training pipeline |
+| **Day 3-4** | Train all variants (Zone C - GPU time, but parallel) |
+| **Day 5** | Evaluate all, pick winner, plan next iteration |
 
-### Phase 2: Decision Point
+**This is what "iteration is cheap" actually means.** Don't do 1 careful experiment - do 5 fast ones.
 
-If spike succeeds:
-- Commit to 2-3 month prototype
-- Need A100 access for training
-- Parallel: Keep shipping product features
+### The Domain Moat Play
 
-If spike fails:
-- Accept Scribe is better
-- Focus on value-add features
-- Consider Scribe API integration for quality-critical use cases
+**Don't try to beat Scribe on general audio.** That's fighting their Zone C advantage (100M+ hours of training data).
+
+**Instead:** Fine-tune on YOUR architecture domain audio + add boundary refinement.
+
+If you have:
+- 100+ hours of architecture conversations
+- Ground truth speaker labels
+- Domain-specific vocabulary
+
+Then a smaller model specialized on YOUR domain can beat Scribe's general model *on your use case*.
+
+### Success Criteria (After 5-Day Sprint)
+
+- **Win:** Any variant achieves <0.3s boundary error (vs current 0.58s)
+- **Partial:** Improvement to 0.4-0.5s, worth iterating
+- **Fail:** No improvement → use Scribe, differentiate on features
+
+### If Sprint Succeeds
+
+Week 2: Iterate on winning approach, try 5 more variants
+Week 3-4: Productionize, integrate with diarize.io pipeline
+Week 5+: Ship and measure real-world quality
+
+**Total timeline to production:** 4-6 weeks, not 3-6 months
+
+### If Sprint Fails
+
+Not a "failure" - it's information. Means boundary refinement isn't the lever.
+
+Then:
+- Use Scribe for quality-critical jobs
+- Differentiate on features (speaker naming, summarization, search)
+- Your pipeline for cost-sensitive jobs
 
 ---
 
@@ -281,12 +317,25 @@ If spike fails:
 
 ---
 
-## Conclusion
+## Conclusion (Feasibility-Calibrated)
 
-**The Fractal diarization approach is technically plausible but unproven.**
+**The Fractal diarization approach is Zone A: feels ambitious, actually routine.**
 
-Unlike JSON repair (where heuristics won), diarization has no simple solution. The hierarchical, bidirectional refinement approach could work.
+Unlike my initial assessment ("3-6 months, high risk"), the recalibrated view:
 
-**But:** It's a research project with uncertain outcome. Don't commit without validating the core hypothesis in a 2-week spike.
+| My Initial Take | Recalibrated Reality |
+|-----------------|---------------------|
+| "2-week spike first" | 5-day sprint with 5 parallel experiments |
+| "3-6 months to build" | 4-6 weeks to production |
+| "High risk research" | Zone A exploration (cheap to try) |
+| "Validate before committing" | Just try it - iteration is cheap |
 
-**The honest question:** Are you willing to spend 3-6 months on research that might fail, when you could be shipping product features and using Scribe as a benchmark?
+**The only Zone C blockers:**
+1. GPU training time (irreducible but parallelizable)
+2. ElevenLabs' data moat (don't fight it - go domain-specific)
+
+**Everything else is Zone A:** Implementation, architecture exploration, fine-tuning, evaluation.
+
+**The honest question (recalibrated):** Why are we hesitating? The cost of trying is 5 days. The cost of NOT trying is wondering if we could have beaten Scribe on our domain.
+
+**Just build 5 variants and see what works.**
