@@ -9,19 +9,24 @@
 
 ## Phase 1: Validation (Days 1-3)
 
-### Day 1 - 2025-12-02 (Mon)
+### Day 1 - 2025-12-01 (Sun - started early)
 **Goal:** Setup & paper reading
 
 | Time | Planned | Actual | Notes |
 |------|---------|--------|-------|
-| AM | Read DiariZen paper | | |
-| AM | Read Flow-TSVAD paper | | |
-| PM | Clone DiariZen, setup env | | |
-| PM | Download DIHARD III + VoxConverse | | |
-| PM | Run inference on test file | | |
+| AM | Read DiariZen paper | ✓ Done | WavLM Base+ (94.7M) + Conformer (6.1M), 11-class powerset, 3-stage pipeline |
+| AM | Read Flow-TSVAD paper | ✓ Done | Flow matching in latent space, 2-step inference, 11.21% CALLHOME |
+| PM | Clone DiariZen, setup env | ✓ Done | PyTorch 2.2.0, pyannote-audio 3.1 |
+| PM | Download DIHARD III + VoxConverse | ⏳ In progress | VoxConverse dev downloading, DIHARD needs LDC license |
+| PM | Run inference on test file | ✓ Done | 4 speakers detected on 30s test clip |
 
-**Deliverable:** DiariZen running locally
-**Status:** [ ] Not started
+**Key Findings:**
+- DiariZen-Large-s80 achieves **9.1% DER on VoxConverse** (not 5.2% - that was from a different eval protocol)
+- DiariZen achieves **14.5% DER on DIHARD3** (target: beat 14.49%)
+- No explicit boundary refinement in DiariZen - purely frame-level classification + clustering
+
+**Deliverable:** DiariZen running locally ✓
+**Status:** [x] Complete (pending VoxConverse audio download)
 
 ---
 
@@ -32,7 +37,7 @@
 |------|---------|--------|-------|
 | AM | Run DiariZen on VoxConverse test | | |
 | AM | Run DiariZen on DIHARD III dev | | |
-| PM | Compare to published (5.2% VoxC, ~15-17% DIHARD) | | |
+| PM | Compare to published (9.1% VoxC, 14.5% DIHARD) | | |
 | PM | Debug if numbers don't match | | |
 
 **Deliverable:** Verified baseline DER numbers
@@ -202,7 +207,7 @@
 | Benchmark | Baseline | Ours | SOTA | Beat SOTA? |
 |-----------|----------|------|------|------------|
 | DIHARD III test | | | 14.49% | |
-| VoxConverse test | | | 5.2% | |
+| VoxConverse test | | | 9.1% | |
 
 **Status:** [ ] Not started
 

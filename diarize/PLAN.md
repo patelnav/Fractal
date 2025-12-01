@@ -2,7 +2,7 @@
 
 ## Hypothesis
 
-**Boundary jitter is a significant portion of remaining DER in SOTA systems.** If we add a targeted boundary refinement stage to DiariZen (current open-source SOTA at 5.2% DER on VoxConverse), we can beat SOTA without reinventing the core diarization pipeline.
+**Boundary jitter is a significant portion of remaining DER in SOTA systems.** If we add a targeted boundary refinement stage to DiariZen (current open-source SOTA at 9.1% DER on VoxConverse, no collar), we can beat SOTA without reinventing the core diarization pipeline.
 
 ## Constraints
 
@@ -16,7 +16,7 @@
 | Level | Target | Benchmark |
 |-------|--------|-----------|
 | **Home run** | Beat 14.49% DER | DIHARD III |
-| **Strong win** | Beat 5.2% DER | VoxConverse |
+| **Strong win** | Beat 9.1% DER | VoxConverse |
 | **Win** | Statistically significant DER improvement | Either benchmark |
 | **Partial** | Measurable boundary precision improvement | Custom metric |
 | **Fail** | No improvement after honest effort | - |
