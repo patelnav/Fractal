@@ -35,13 +35,49 @@
     uv pip install torch transformers vllm datasets
     ```
 
-### B. Logging & Monitoring
+### B. GPU Dependency Testing (CRITICAL - Avoid Wasting $$)
+
+**Problem:** Python dependency hell can waste hours of GPU time ($$$) on failed installations.
+
+**Rule:** Test package installation **locally with CPU** BEFORE launching GPU - but ONLY for packages, not data.
+
+#### What to Test Locally (< 1 min, saves $$$):
+```bash
+# In /tmp (isolated from project):
+cd /tmp && rm -rf test_deps
+git clone <repo_url> test_deps && cd test_deps
+python3 -m venv .venv && source .venv/bin/activate
+
+# Test with CPU-only PyTorch (faster download):
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+pip install -e .
+
+# Verify imports work:
+python -c "from main_module import MainClass; print('SUCCESS')"
+```
+
+#### What NOT to Test Locally:
+*   **Large datasets** (> 500MB) - download on GPU instance
+*   **CUDA-specific code** - will fail on Mac anyway
+*   **Actual training/inference** - needs GPU
+
+#### When to Skip Local Testing:
+*   Simple pip packages with no submodules
+*   Previously tested environment (reusing known-good requirements.txt)
+
+#### Git Clone Strategy (Remote):
+*   **ALWAYS** use fresh `git clone` on Lambda
+*   **NEVER** rsync/sync local dev directories with git submodules
+*   Git submodules need `.git` directory to work
+
+### C. Logging & Monitoring
 *   **Rule:** ALL long-running commands must be logged to disk.
 *   **Pattern:**
     ```bash
     # Local
     python script.py 2>&1 | tee /tmp/run.log
-    
+
     # Remote (Lambda) - Log BOTH on remote and local
     ssh lambda "... python script.py 2>&1 | tee ~/Fractal/.../remote.log" 2>&1 | tee /tmp/local.log
     ```

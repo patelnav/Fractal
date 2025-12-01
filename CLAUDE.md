@@ -99,6 +99,22 @@ energy_wrong = energy_head(embed_pair(condition, wrong))     # → 1
 - **ALWAYS tee script output to `/tmp/`** and tell me where to tail it
 - **Use `uv` for package management**, keep `requirements.txt` updated
 
+## Lambda GPU Instance Management
+
+**CRITICAL RULES - DO NOT VIOLATE:**
+1. **NEVER terminate a Lambda instance before completing ALL requested tasks**
+2. **If a task fails or is unclear, ASK before terminating - DO NOT assume it's optional**
+3. **When given a checklist of tasks, complete EVERY item before shutdown**
+4. **If you cannot complete a task, explicitly confirm with user before terminating**
+5. **Archive/download results BEFORE termination, not during**
+
+**Common Mistake to Avoid:**
+- User requests: "run benchmark, create archive, download results, run analysis, then shutdown"
+- WRONG: Complete some tasks, skip one because tool not found, terminate anyway
+- RIGHT: Complete all tasks OR ask user about missing tasks BEFORE terminating
+
+Lambda instances cost $1.29+/hr. Terminating early wastes both time and money if work must be redone.
+
 ## Feasibility Calibration
 
 - **Read `FEASIBILITY_CALIBRATION.md`** for calibrated possibility intuitions
