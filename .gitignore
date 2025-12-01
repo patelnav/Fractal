@@ -39,3 +39,5 @@ nanoGPT/
 cache/
 results/
 **/node_modules/json_repair/
+json_repair/
+node_modules/
