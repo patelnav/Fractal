@@ -8,6 +8,14 @@ Optimized for large-scale training on A100 GPUs:
 - 500K+ samples, 100 epochs
 - REINFORCE loss for direct parse success optimization
 
+V2 Improvements (text-level corruptions):
+- Python constants (True/False/None → true/false/null)
+- Single quotes → double quotes
+- Unquoted keys → quoted keys
+- Markdown fences → stripped
+- Comments → stripped
+- Multi-error combinations
+
 Usage:
     python train_denoiser_a100.py --device cuda --epochs 100 --train_samples 500000
 
@@ -286,7 +294,7 @@ def main():
 
     # Training params
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--batch_size', type=int, default=256, help='Batch size per GPU')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size per GPU (512 on A100)')
     parser.add_argument('--accumulation_steps', type=int, default=1, help='Gradient accumulation steps')
     parser.add_argument('--lr', type=float, default=1e-3, help='Peak learning rate')
     parser.add_argument('--warmup_epochs', type=int, default=5, help='Warmup epochs')
@@ -384,8 +392,10 @@ def main():
         num_samples=args.train_samples,
         max_len=args.max_len,
         sigma_min=0.1,
-        sigma_max=0.5,
+        sigma_max=0.8,  # Increased for more multi-error training
         seed=args.seed,
+        text_corruption_prob=0.5,  # 50% text-level corruptions
+        multi_error_prob=0.3,  # 30% multi-error combos
     )
     print(f"Train dataset created in {time.time() - t0:.1f}s")
 
@@ -393,13 +403,16 @@ def main():
         num_samples=args.val_samples,
         max_len=args.max_len,
         sigma_min=0.1,
-        sigma_max=0.5,
+        sigma_max=0.8,
         seed=args.seed + 1000,
+        text_corruption_prob=0.5,
+        multi_error_prob=0.3,
     )
 
     eval_dataset = JSONEvalDataset(
         num_samples=500,
         max_len=args.max_len,
+        include_text_corruptions=True,  # Include Python constants, quotes, fences, etc.
         seed=args.seed + 2000,
     )
 

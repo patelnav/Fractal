@@ -48,8 +48,14 @@ class JSONTokenizer:
     # Core structural tokens
     STRUCTURAL = ['{', '}', '[', ']', ':', ',']
 
-    # Literal tokens
+    # Literal tokens (JSON standard)
     LITERALS = ['true', 'false', 'null']
+
+    # Python literal tokens (non-standard, need to learn to fix)
+    PYTHON_LITERALS = ['True', 'False', 'None']
+
+    # LLM artifact tokens
+    LLM_ARTIFACTS = ['<FENCE>', '<FENCE_JSON>', '<COMMENT>', '<PROSE>']
 
     # Special tokens
     SPECIAL = ['<PAD>', '<MASK>', '<BOS>', '<EOS>']
@@ -83,8 +89,14 @@ class JSONTokenizer:
         # Structural tokens
         self.vocab.extend(self.STRUCTURAL)
 
-        # Literals
+        # Literals (JSON standard)
         self.vocab.extend(self.LITERALS)
+
+        # Python literals (non-standard, to be fixed)
+        self.vocab.extend(self.PYTHON_LITERALS)
+
+        # LLM artifacts (to be stripped)
+        self.vocab.extend(self.LLM_ARTIFACTS)
 
         # String tokens
         self.vocab.extend(self.STRING_TOKENS)
@@ -123,9 +135,22 @@ class JSONTokenizer:
         self.colon_id = self.stoi[':']
         self.comma_id = self.stoi[',']
 
+        # Python literal IDs (non-standard)
+        self.true_py_id = self.stoi['True']
+        self.false_py_id = self.stoi['False']
+        self.none_py_id = self.stoi['None']
+
+        # LLM artifact IDs
+        self.fence_id = self.stoi['<FENCE>']
+        self.fence_json_id = self.stoi['<FENCE_JSON>']
+        self.comment_id = self.stoi['<COMMENT>']
+        self.prose_id = self.stoi['<PROSE>']
+
         self.special_ids = {self.pad_id, self.mask_id, self.bos_id, self.eos_id}
         self.structural_ids = {self.lbrace_id, self.rbrace_id, self.lbracket_id,
                                self.rbracket_id, self.colon_id, self.comma_id}
+        self.python_literal_ids = {self.true_py_id, self.false_py_id, self.none_py_id}
+        self.artifact_ids = {self.fence_id, self.fence_json_id, self.comment_id, self.prose_id}
 
     @property
     def vocab_size(self) -> int:
@@ -136,8 +161,25 @@ class JSONTokenizer:
         Lexically tokenize JSON text into JSONToken objects.
 
         Returns list of tokens with type, value, and position info.
-        Raises ValueError on lexer errors.
+        Handles LLM prose by skipping text before the first { or [ and
+        after the last } or ].
         """
+        # Find JSON boundaries (skip prose before/after)
+        json_start = -1
+        json_end = len(text)
+        for idx, c in enumerate(text):
+            if c in '{[':
+                json_start = idx
+                break
+        for idx in range(len(text) - 1, -1, -1):
+            if text[idx] in '}]':
+                json_end = idx + 1
+                break
+
+        # If we found valid boundaries, trim the text
+        if json_start > 0:
+            text = text[json_start:json_end]
+
         tokens = []
         i = 0
         n = len(text)
@@ -251,6 +293,95 @@ class JSONTokenizer:
                 i += 4
                 continue
 
+            # Python True (non-standard)
+            if text[i:i + 4] == 'True':
+                tokens.append(JSONToken('TRUE_PY', 'True', i, i + 4))
+                i += 4
+                continue
+
+            # Python False (non-standard)
+            if text[i:i + 5] == 'False':
+                tokens.append(JSONToken('FALSE_PY', 'False', i, i + 5))
+                i += 5
+                continue
+
+            # Python None (non-standard)
+            if text[i:i + 4] == 'None':
+                tokens.append(JSONToken('NONE_PY', 'None', i, i + 4))
+                i += 4
+                continue
+
+            # Markdown fence with json (```json)
+            if text[i:i + 7] == '```json':
+                tokens.append(JSONToken('FENCE_JSON', '```json', i, i + 7))
+                i += 7
+                continue
+
+            # Markdown fence (```)
+            if text[i:i + 3] == '```':
+                tokens.append(JSONToken('FENCE', '```', i, i + 3))
+                i += 3
+                continue
+
+            # Line comment (//)
+            if text[i:i + 2] == '//':
+                start = i
+                i += 2
+                while i < n and text[i] != '\n':
+                    i += 1
+                tokens.append(JSONToken('COMMENT', text[start:i], start, i))
+                continue
+
+            # Block comment (/* ... */)
+            if text[i:i + 2] == '/*':
+                start = i
+                i += 2
+                while i < n - 1 and text[i:i + 2] != '*/':
+                    i += 1
+                if i < n - 1:
+                    i += 2  # Skip closing */
+                tokens.append(JSONToken('COMMENT', text[start:i], start, i))
+                continue
+
+            # Single-quoted string (non-standard)
+            if c == "'":
+                start = i
+                i += 1
+                chars = []
+                while i < n and text[i] != "'":
+                    if text[i] == '\\' and i + 1 < n:
+                        # Handle escape sequences
+                        esc = text[i + 1]
+                        if esc == 'n':
+                            chars.append('\n')
+                        elif esc == 't':
+                            chars.append('\t')
+                        elif esc == "'":
+                            chars.append("'")
+                        elif esc == '\\':
+                            chars.append('\\')
+                        else:
+                            chars.append(text[i:i + 2])
+                        i += 2
+                    else:
+                        chars.append(text[i])
+                        i += 1
+                if i < n:
+                    i += 1  # Skip closing quote
+                tokens.append(JSONToken('STRING', ''.join(chars), start, i))
+                continue
+
+            # Unquoted identifier (non-standard key like {name: "value"})
+            if c.isalpha() or c == '_':
+                start = i
+                while i < n and (text[i].isalnum() or text[i] == '_'):
+                    i += 1
+                ident = text[start:i]
+                # Check if it's a known literal we might have missed
+                if ident not in ('true', 'false', 'null', 'True', 'False', 'None'):
+                    tokens.append(JSONToken('IDENT', ident, start, i))
+                continue
+
             # Unknown character - skip but record position for error localization
             # In a real scenario, this might be the corruption we need to fix
             tokens.append(JSONToken('ERROR', c, i, i + 1))
@@ -297,6 +428,28 @@ class JSONTokenizer:
                 ids.append(self.stoi['false'])
             elif tok.type == 'NULL':
                 ids.append(self.stoi['null'])
+            elif tok.type == 'TRUE_PY':
+                ids.append(self.true_py_id)
+            elif tok.type == 'FALSE_PY':
+                ids.append(self.false_py_id)
+            elif tok.type == 'NONE_PY':
+                ids.append(self.none_py_id)
+            elif tok.type == 'FENCE':
+                ids.append(self.fence_id)
+            elif tok.type == 'FENCE_JSON':
+                ids.append(self.fence_json_id)
+            elif tok.type == 'COMMENT':
+                ids.append(self.comment_id)
+            elif tok.type == 'IDENT':
+                # Unquoted identifier - treat as a string
+                if len(tok.value) == 0:
+                    ids.append(self.str_empty_id)
+                else:
+                    ids.append(self.str_id)
+                    for c in tok.value[:self.max_string_len]:
+                        if c in self.stoi:
+                            ids.append(self.stoi[c])
+                    ids.append(self.str_id)
             elif tok.type == 'STRING':
                 # Tokenize string content character by character
                 if len(tok.value) == 0:
@@ -353,9 +506,28 @@ class JSONTokenizer:
                 i += 1
                 continue
 
-            # Literals
+            # Literals (JSON standard)
             if tok in self.LITERALS:
                 parts.append(tok)
+                i += 1
+                continue
+
+            # Python literals -> JSON literals (normalize)
+            if tok == 'True':
+                parts.append('true')
+                i += 1
+                continue
+            if tok == 'False':
+                parts.append('false')
+                i += 1
+                continue
+            if tok == 'None':
+                parts.append('null')
+                i += 1
+                continue
+
+            # LLM artifacts - SKIP (strip completely)
+            if tok_id in self.artifact_ids:
                 i += 1
                 continue
 
@@ -371,7 +543,10 @@ class JSONTokenizer:
                 chars = []
                 while i < len(ids) and ids[i] != self.str_id:
                     c = self.itos.get(ids[i], '')
-                    if c and c not in ['<PAD>', '<MASK>', '<BOS>', '<EOS>', '<STR>', '<STR_EMPTY>', '<NUM>']:
+                    # Skip special tokens and artifacts
+                    if c and c not in ['<PAD>', '<MASK>', '<BOS>', '<EOS>', '<STR>', '<STR_EMPTY>', '<NUM>',
+                                       '<FENCE>', '<FENCE_JSON>', '<COMMENT>', '<PROSE>',
+                                       'True', 'False', 'None']:
                         # Escape special JSON characters
                         if c == '"':
                             chars.append('\\"')

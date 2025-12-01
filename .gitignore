@@ -38,3 +38,4 @@ nanoGPT/
 # Cache
 cache/
 results/
+**/node_modules/json_repair/
