@@ -272,13 +272,26 @@ Boundary error percentage: 4.58% of total audio
 
 ## Time Tracking
 
+### Original Estimate (Day-Based)
+
 | Phase | Planned | Actual | Variance |
 |-------|---------|--------|----------|
-| Phase 1 (Validation) | 3 days | 3 days | ✅ On track |
-| Phase 2 (Implementation) | 4 days | Day 4 complete | In progress |
-| Phase 3 (Training) | 4 days | | |
-| Phase 4 (Iteration) | 3 days | | |
-| **Total** | 14 days | | |
+| Phase 1 (Validation) | 3 days | **0.5 days** | 6x faster |
+| Phase 2 (Implementation) | 4 days | **0.5 days** | 8x faster |
+| Phase 3 (Training) | 4 days | TBD | Zone C dominated |
+| Phase 4 (Iteration) | 3 days | TBD | |
+| **Total** | 14 days | ~2-3 days projected | |
+
+### Updated Estimate (Decision Point Framework)
+
+| Phase | Decision Points | Zone C Hours | Estimated Wall Clock |
+|-------|-----------------|--------------|---------------------|
+| Phase 1-2 | ~15 | 0 | **~8 hours** ✅ |
+| Phase 3 | ~10 | ~8 (GPU) | **1-2 days** |
+| Phase 4 | ~5 | ~4 (GPU) | **0.5-1 day** |
+| **Total** | ~30 | ~12 | **~3-4 days** |
+
+**Key insight:** Phase 1-2 had no Zone C blockers → compressed to 1 focused session. Phase 3-4 are Zone C dominated → wall clock depends on GPU training time, not implementation.
 
 ---
 
@@ -751,5 +764,79 @@ x = mean + sigma_t * torch.randn_like(x)
 **Day 5.5 Status:** ✅ COMPLETE (decision made: 3 models for Phase 3)
 
 **Next:** Phase 3 preparation - full training on VoxConverse
+
+---
+
+## Calibration Retrospective (2025-12-02)
+
+### Timeline Compression: 5.5x
+
+**Original PLAN.md estimated:**
+- Phase 1 (Validation): Days 1-3
+- Phase 2 (Implementation): Days 4-7
+- **Total Phase 1-2:** 7 days
+
+**Actual:**
+- All of Phase 1-2 completed on **2025-12-01** (Sunday)
+- **Total elapsed:** 1 day (~8 hours of focused engagement)
+- **Compression ratio:** 5.5x
+
+### Why Traditional Estimates Failed
+
+The original plan used human-paced thinking:
+- "Day 2 PM: If numbers don't match, debug" → Numbers were better, no debug needed
+- "Days 5-6: Implement variants" → All 4 done in one evening
+- "Day 7: Training pipeline" → Already done by Day 4
+
+**The rate-limiting step was NOT implementation complexity.**
+
+### Decision Point Analysis
+
+| Planned Day | Work | Decision Points | Actual Time |
+|-------------|------|-----------------|-------------|
+| Day 1 | Papers, setup | 2 | ~1 hour |
+| Day 2 | Baseline eval | 2 | ~1 hour |
+| Day 3 | Error analysis | 2 | ~1 hour |
+| Day 4 | Architecture | 3 | ~2 hours |
+| Day 5 | Implement variants | 4 | ~3 hours |
+| Day 5.5 | Diffusion decision | 2 | ~30 min |
+| **Total** | | **~15** | **~8 hours** |
+
+**Key insight:** ~15 decision points × ~5 min decision latency (focused) = ~1.25 hours of decision time. Add ~6 hours of Claude work. Total: ~8 hours.
+
+### What Was Actually Blocked (Zone C)
+
+1. **DIHARD III dataset** - Still needs LDC license (external dependency)
+2. **Diffusion algorithm** - Required novel insight, not just iteration (Zone C)
+3. **GPU training** - Still ahead, irreducible compute time
+
+### Updated Phase 3 Estimate
+
+Using the new framework:
+
+**Decision Points (Phase 3):**
+- Launch training runs: 1
+- Monitor/debug training: 2-3
+- Evaluate results: 2
+- Decide on iteration: 2
+- Final evaluation: 2
+- **Total: ~10 decisions**
+
+**Zone C Blockers:**
+- 3 training runs × 5 hours = 15 GPU hours
+- Can parallelize → ~6-8 wall clock hours
+
+**Engagement pattern:** Intermittent (checking during training)
+
+**Estimated wall clock:** 1-2 days (including overnight training)
+
+### Lessons for Future Planning
+
+1. **Count decision points, not days**
+2. **Identify Zone C blockers explicitly** - they dominate timeline
+3. **Implementation complexity is free** - 3,200 lines in one evening
+4. **Focused engagement compresses dramatically** - 5.5x on Sunday
+
+**See:** `~/Developer/FEASIBILITY_CALIBRATION.md` for the full framework.
 
 ---

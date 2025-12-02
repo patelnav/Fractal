@@ -36,3 +36,35 @@ We have validated a novel 3-part architecture (proven in Phase 6 "Hybrid"):
 We are now applying this architecture to specific domains including Coding, World Models, and Governance.
 
 **For the detailed list of exploration vectors and the scoring rubric, see [Vectors/README.md](Vectors/README.md).**
+
+---
+
+## 5. Project Planning Framework
+
+**See [~/Developer/FEASIBILITY_CALIBRATION.md](~/Developer/FEASIBILITY_CALIBRATION.md) for the full framework.**
+
+### Key Insight: Decision Points, Not Days
+
+Traditional timelines assume `Timeline = f(Implementation Complexity)`. With Claude Code, implementation complexity collapses. What remains:
+
+```
+Timeline = f(Decision Points, Engagement Pattern, Zone C Blockers)
+```
+
+### Empirical Evidence
+
+| Project | Planned | Actual | Compression |
+|---------|---------|--------|-------------|
+| Fractal (37 phases) | ~months | 6 days | ~10-20x |
+| Diarization Phase 1-2 | 5.5 days | 1 day | 5.5x |
+
+**The rate-limiting step is human decision latency, not implementation capacity.**
+
+### Project Scope in Decision Points
+
+| Scope | Decision Points | Zone C Blockers |
+|-------|-----------------|-----------------|
+| Fractal Phase 1-30 | ~100-150 | GPU training (~50 hours total) |
+| Diarization Sprint | ~40-50 | GPU training (~20 hours) + datasets |
+
+When planning new exploration vectors, estimate decision points and Zone C blockers—not "days."

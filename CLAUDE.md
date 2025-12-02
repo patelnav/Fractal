@@ -117,7 +117,7 @@ Lambda instances cost $1.29+/hr. Terminating early wastes both time and money if
 
 ## Feasibility Calibration
 
-- **Read `FEASIBILITY_CALIBRATION.md`** for calibrated possibility intuitions
+- **Read `~/Developer/FEASIBILITY_CALIBRATION.md`** for calibrated possibility intuitions
 - Claude's training makes things *feel* impossible that are actually routine (Zone A)
 - Key question: "Is this blocked by iteration cost (collapses) or something irreducible (Zone C)?"
 - If something feels "too ambitious," ask: Zone A or Zone C blocker?
