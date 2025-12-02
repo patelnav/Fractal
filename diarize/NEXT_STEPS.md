@@ -74,30 +74,84 @@
 - `boundary_refinement/scripts/train.py` (main entry point)
 - `boundary_refinement/configs/mlp_test.toml` (Mac test config)
 
-### Day 5-6 (Implementation) - IN PROGRESS
+### Day 5 (Implementation) - PARTIAL COMPLETE ✅
 
-Build remaining 3 variants:
+**✅ COMPLETED - All 3 Model Architectures Implemented:**
 
-**✅ Variant 1: MLP Baseline - COMPLETE**
-- Concatenate WavLM features + speaker embeddings
-- Simple MLP predicts boundary offset
-- Status: Validated on Mac (25ms MAE overfit)
-- Parameters: 822K
-- Purpose: Sanity check - PASSED ✅
+**Variant 1: MLP Baseline** - 822K params
+- Status: COMPLETE ✅
+- Mac overfit test: 25ms MAE ✅
 
-**Variant 2: Transformer Refinement - TO IMPLEMENT**
-- Bidirectional transformer over boundary window
-- Cross-attention to left/right speaker embeddings
-- Purpose: Standard attention-based approach
+**Variant 2: Transformer Refinement** - 1.4M params
+- ✅ Implemented: Bidirectional attention over 200 frames
+- ✅ Novel dual speaker conditioning (LEFT + RIGHT tokens)
+- ✅ Forward pass tested
+- ✅ Config created (transformer_test.toml)
+- ⏳ Needs: Overfit test validation
 
-**Variant 3: Diffusion Boundary - TO IMPLEMENT** (Our novel contribution!)
-- Treat boundary position as coordinate to denoise
-- Condition on audio features + speaker embeddings
-- Multiple denoising steps (DiffSED-style)
-- Purpose: Our main hypothesis
-- Reference: DiffSED (Bhosale et al., 2023)
+**Variant 3: Diffusion Boundary** - 1.6M params (NOVEL CONTRIBUTION!)
+- ✅ Implemented: First diffusion model for speaker diarization boundaries
+- ✅ U-Net with skip connections, T=10 denoising steps
+- ✅ Training (noise prediction) + inference (iterative denoising) tested
+- ✅ Config created (diffusion_test.toml)
+- ⏳ Needs: Trainer modifications for diffusion training loop
+- ⏳ Needs: Overfit test validation
 
-**Variant 4: Contrastive Boundary - TO IMPLEMENT**
+**Variant 4: Contrastive Boundary** - 361K params
+- ✅ Implemented: Position scoring with InfoNCE loss
+- ✅ Soft weighted averaging for sub-frame precision
+- ✅ Forward pass tested
+- ✅ Config created (contrastive_test.toml)
+- ⏳ Needs: Trainer modifications for score→offset conversion
+- ⏳ Needs: Overfit test validation
+
+**Infrastructure Updates:**
+- ✅ DiffusionLoss added to losses.py
+- ✅ train.py updated to load all 4 model types
+- ✅ All loss functions integrated (SmoothL1, InfoNCE, Diffusion)
+- ✅ Git commit created (d3d9b7c)
+
+### Day 5 Remaining Tasks (2-3 hours)
+
+**Critical Path:**
+
+1. **Trainer Modifications** (~100 lines, 30 min)
+   - File: `boundary_refinement/training/trainer.py`
+   - Contrastive: Add `scores_to_offsets()` helper in validation_step
+   - Diffusion: Modify training_step to add noise + predict noise
+   - Diffusion: Modify validation_step to use iterative denoising
+
+2. **Model Registry** (5 min)
+   - File: `boundary_refinement/models/__init__.py`
+   - Export all 4 model classes
+
+3. **Overfit Tests** (2 hours each, can run in parallel)
+   ```bash
+   # Transformer
+   python boundary_refinement/scripts/train.py \
+       --config boundary_refinement/configs/transformer_test.toml \
+       --overfit_test --device cpu
+
+   # Contrastive
+   python boundary_refinement/scripts/train.py \
+       --config boundary_refinement/configs/contrastive_test.toml \
+       --overfit_test --device cpu
+
+   # Diffusion
+   python boundary_refinement/scripts/train.py \
+       --config boundary_refinement/configs/diffusion_test.toml \
+       --overfit_test --device cpu
+   ```
+
+4. **Quick Test Script** (10 min, optional)
+   - Validate all 4 models load and forward without errors
+
+**Success Criteria:**
+- All 3 variants achieve loss decreasing (overfitting works)
+- Expected MAE: Transformer <25ms, Contrastive <20ms, Diffusion <100ms
+- No NaN/Inf errors
+
+### Day 6 (Remaining Implementation)
 - Binary classifier: "Is this the correct boundary?"
 - Train with positive/negative pairs
 - Inference: slide window, find maximum
