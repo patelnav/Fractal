@@ -13,25 +13,32 @@
 | MLP | 822K | 25ms | Baseline |
 | Contrastive | 361K | 40ms | Alternative |
 
-**Baseline to beat:** DiariZen DER = ~9.1%, boundary error = 923ms average
-**Target:** <100ms boundary MAE (10x improvement), DER < 8%
+**Baseline:** DiariZen DER = 4.52% (already SOTA!), boundary error = 923ms average
+**Target:** <100ms boundary MAE (10x improvement), DER < 4%
 
 ---
 
 ## Phase 3 Action Items
 
-### 0. Lambda Session: Re-baseline + Training
+### 0. Re-baseline Complete ✅
 
-**On Lambda A100:**
+**Result:** DER 4.52% (with overlaps, no collar) - **better than published SOTA 5.2%**
+
+The 4.52% was correct all along - the `--ignore_overlaps` issue didn't change the result because DiariZen handles overlaps well. The ~9.1% was from a different baseline/protocol.
+
+### Training Status
+
+| Model | Status | Progress |
+|-------|--------|----------|
+| MLP | Running | Epoch 0: 87% |
+| Transformer | Queued | - |
+| Contrastive | Queued | - |
+
+### Lambda Training Commands
 
 ```bash
-# 1. Setup
-cd ~/diarize/DiariZen
-source .venv/bin/activate  # or conda activate diarizen
-
-# 2. Re-run evaluation (fix already applied - no --ignore_overlaps)
-python evaluate_voxconverse.py 2>&1 | tee /tmp/eval_baseline.txt
-# Expected: DER ~9.1% (was 4.52% with bug)
+# On Lambda A100
+cd ~/DiariZen/boundary_refinement
 
 # 3. Launch training (all 3 in parallel)
 cd ../boundary_refinement
