@@ -33,6 +33,7 @@ nanoGPT/
 /tmp/
 .lambda_api_key
 .lambda_instance_id
+.lambda_instances.json
 .env
 
 # Cache
