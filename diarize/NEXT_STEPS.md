@@ -13,12 +13,25 @@
 | MLP | 822K | 25ms | Baseline |
 | Contrastive | 361K | 40ms | Alternative |
 
-**Baseline to beat:** DiariZen boundary error = 923ms average
-**Target:** <100ms MAE (10x improvement)
+**Baseline to beat:** DiariZen DER = ~9.1%, boundary error = 923ms average
+**Target:** <100ms boundary MAE (10x improvement), DER < 8%
 
 ---
 
 ## Phase 3 Action Items
+
+### 0. Fix Evaluation & Re-baseline (~1 decision point)
+
+**Bug found:** `--ignore_overlaps` was excluding hardest ~10-20% of audio.
+
+```bash
+# Fix evaluate_voxconverse.py - remove --ignore_overlaps flag
+# Then re-run:
+python evaluate_voxconverse.py
+```
+
+**Expected:** DER ~9.1% (not 4.52%)
+**Note:** Boundary analysis (~50% from jitter) still valid.
 
 ### 1. Launch Training (~1 decision point)
 

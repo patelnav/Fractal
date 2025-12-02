@@ -11,6 +11,7 @@
 *   **Rule:** NEVER execute a script (training, generation, mutation) based on implied context or a generic "continue" prompt.
 *   **Requirement:** You must receive a specific, explicit instruction (e.g., "Run the training loop").
 *   **Dry Run:** Before running any state-changing command, explicitly display the command and **wait for user confirmation**.
+*   **Exception - Full Workflows:** If the user provides a complete checklist/plan and says "get on with it" or similar, execute the ENTIRE workflow autonomously using `lambda_helper.py`. Do NOT wait between steps - the user wants continuous execution.
 
 ### B. Lambda Safety
 *   **Termination:** NEVER auto-terminate an instance. ALWAYS ask the user first.
@@ -89,11 +90,23 @@ python -c "from main_module import MainClass; print('SUCCESS')"
 
 ### Lambda Helper (`lambda_helper.py`)
 Wrapper for Lambda Labs API.
-*   `python lambda_helper.py launch` - Start new GPU instance.
-*   `python lambda_helper.py wait` - Wait for SSH availability.
-*   `python lambda_helper.py setup-ssh` - Configures `ssh lambda`.
-*   `python lambda_helper.py sync research-log/PHASE_DIR` - Push code to remote.
+*   `python lambda_helper.py launch` - Start new GPU instance (auto-selects A100, saves instance ID).
+*   `python lambda_helper.py wait` - Wait for SSH availability (run in background, polls until ready).
+*   `python lambda_helper.py setup-ssh` - Configures `ssh lambda` alias in ~/.ssh/config.
+*   `python lambda_helper.py sync [research-log/PHASE_DIR]` - Push code to remote via rsync.
+*   `python lambda_helper.py run "command"` - Execute command on remote via SSH.
 *   `python lambda_helper.py terminate` - Stop instance (**⚠️ ALWAYS ask user first!**)
+
+**Autonomous Workflow Pattern:**
+```bash
+# Full workflow without waiting for user between steps
+python lambda_helper.py launch          # Launch instance
+python lambda_helper.py wait            # Wait for SSH (blocks until ready)
+python lambda_helper.py setup-ssh       # Configure SSH alias
+ssh lambda "bash -s" < script.sh        # Run setup script remotely
+ssh lambda "command" 2>&1 | tee /tmp/output.log  # Run tests, log locally
+# Download results, then ask user before terminating
+```
 
 ### Environment Variables
 *   **Remote Root:** `~/Fractal/`

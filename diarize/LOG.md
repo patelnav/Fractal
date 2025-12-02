@@ -767,6 +767,38 @@ x = mean + sigma_t * torch.randn_like(x)
 
 ---
 
+## Evaluation Bug Fix (2025-12-02)
+
+### The Mystery: 4.52% vs Expected 9.1%
+
+**Root cause found:** `--ignore_overlaps` flag in evaluation script.
+
+| Setting | DiariZen (official) | Our evaluation |
+|---------|---------------------|----------------|
+| collar | 0 | 0 ✓ |
+| ignore_overlaps | **NO** | YES ← BUG |
+
+**Why it matters:** Overlapping speech (~10-20% of audio) is the hardest to diarize. By ignoring overlaps, we excluded the hardest regions containing disproportionate error.
+
+**Fix needed:** Remove `--ignore_overlaps` from `evaluate_voxconverse.py:56`
+
+```python
+# BEFORE (wrong)
+"--ignore_overlaps"  # Excludes hardest regions
+
+# AFTER (correct)
+# No --ignore_overlaps flag
+```
+
+**Impact on findings:**
+- ✅ Boundary analysis (~50% from jitter) still valid - calculated independently
+- ⚠️ Baseline DER should be ~9.1%, not 4.52%
+- ⚠️ Need to re-run evaluation before Phase 3 comparisons
+
+**Action item:** Re-baseline with correct evaluation before training.
+
+---
+
 ## Calibration Retrospective (2025-12-02)
 
 ### Timeline Compression: 5.5x
