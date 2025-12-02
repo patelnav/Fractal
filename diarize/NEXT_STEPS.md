@@ -20,18 +20,33 @@
 
 ## Phase 3 Action Items
 
-### 0. Fix Evaluation & Re-baseline (~1 decision point)
+### 0. Lambda Session: Re-baseline + Training
 
-**Bug found:** `--ignore_overlaps` was excluding hardest ~10-20% of audio.
+**On Lambda A100:**
 
 ```bash
-# Fix evaluate_voxconverse.py - remove --ignore_overlaps flag
-# Then re-run:
-python evaluate_voxconverse.py
+# 1. Setup
+cd ~/diarize/DiariZen
+source .venv/bin/activate  # or conda activate diarizen
+
+# 2. Re-run evaluation (fix already applied - no --ignore_overlaps)
+python evaluate_voxconverse.py 2>&1 | tee /tmp/eval_baseline.txt
+# Expected: DER ~9.1% (was 4.52% with bug)
+
+# 3. Launch training (all 3 in parallel)
+cd ../boundary_refinement
+tmux new-session -d -s train_transformer 'python scripts/train.py --config configs/transformer.toml 2>&1 | tee /tmp/train_transformer.txt'
+tmux new-session -d -s train_mlp 'python scripts/train.py --config configs/mlp.toml 2>&1 | tee /tmp/train_mlp.txt'
+tmux new-session -d -s train_contrastive 'python scripts/train.py --config configs/contrastive.toml 2>&1 | tee /tmp/train_contrastive.txt'
+
+# 4. Monitor
+tmux ls  # See running sessions
+tmux attach -t train_transformer  # Watch transformer (Ctrl+B D to detach)
+tail -f /tmp/train_*.txt  # Or watch all logs
 ```
 
-**Expected:** DER ~9.1% (not 4.52%)
-**Note:** Boundary analysis (~50% from jitter) still valid.
+**Zone C:** ~5-6 hours GPU time (parallel)
+**Cost:** ~$7-8
 
 ### 1. Launch Training (~1 decision point)
 
