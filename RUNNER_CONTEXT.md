@@ -90,8 +90,9 @@ python -c "from main_module import MainClass; print('SUCCESS')"
 
 ### Lambda Helper (`lambda_helper.py`)
 Wrapper for Lambda Labs API.
+*   `python lambda_helper.py start` - **PREFERRED: Launch + wait + setup-ssh in ONE blocking call**
 *   `python lambda_helper.py launch` - Start new GPU instance (auto-selects A100, saves instance ID).
-*   `python lambda_helper.py wait` - Wait for SSH availability (run in background, polls until ready).
+*   `python lambda_helper.py wait` - Wait for SSH availability (blocks until ready).
 *   `python lambda_helper.py setup-ssh` - Configures `ssh lambda` alias in ~/.ssh/config.
 *   `python lambda_helper.py sync [research-log/PHASE_DIR]` - Push code to remote via rsync.
 *   `python lambda_helper.py run "command"` - Execute command on remote via SSH.
@@ -99,14 +100,25 @@ Wrapper for Lambda Labs API.
 
 **Autonomous Workflow Pattern:**
 ```bash
-# Full workflow without waiting for user between steps
-python lambda_helper.py launch          # Launch instance
-python lambda_helper.py wait            # Wait for SSH (blocks until ready)
-python lambda_helper.py setup-ssh       # Configure SSH alias
+# Full workflow - ONE blocking command for setup
+python lambda_helper.py start           # Launch + wait + setup-ssh (blocks ~60-90s)
 ssh lambda "bash -s" < script.sh        # Run setup script remotely
 ssh lambda "command" 2>&1 | tee /tmp/output.log  # Run tests, log locally
 # Download results, then ask user before terminating
 ```
+
+### D. Token-Efficient Waiting (CRITICAL)
+*   **NEVER run `wait` in background mode then poll BashOutput** - wastes inference tokens
+*   **ALWAYS run `wait` as BLOCKING command:**
+    ```bash
+    # GOOD: Single blocking call, uses Bash timeout (up to 5 min)
+    python lambda_helper.py wait 2>&1 | tee /tmp/lambda_wait.log
+
+    # BAD: Background + polling wastes tokens
+    # Bash(run_in_background=true) + repeated BashOutput calls
+    ```
+*   The Bash tool has up to 5-minute timeout - plenty for Lambda boot (~60-90s)
+*   `wait_for_ready()` polls internally every 10s - no external polling needed
 
 ### Environment Variables
 *   **Remote Root:** `~/Fractal/`

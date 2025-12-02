@@ -90,12 +90,54 @@ python scripts/train.py --config configs/contrastive.toml 2>&1 | tee /tmp/train_
 
 ## Monitoring
 
-From local machine:
+### Problem: Log files are flooded with warnings
+The training logs (`/tmp/train_*.log`) are 90% "Warning: Using dummy embeddings" messages (one per example). PyTorch Lightning progress bars don't appear in file redirects.
+
+### Solution: Parse TensorBoard event files directly
+
 ```bash
-# Watch logs (replace IP)
-ssh ubuntu@<IP1> "tail -f /tmp/train_transformer.txt"
-ssh ubuntu@<IP2> "tail -f /tmp/train_mlp.txt"
-ssh ubuntu@<IP3> "tail -f /tmp/train_contrastive.txt"
+# Get metrics from TensorBoard logs (run on each instance)
+ssh lambda "cd ~/DiariZen && python3 -c \"
+import os
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+for exp in ['transformer', 'mlp', 'contrastive']:
+    exp_path = f'exp/{exp}'
+    if not os.path.exists(exp_path): continue
+    logs_path = os.path.join(exp_path, 'logs')
+    if not os.path.exists(logs_path): continue
+    for version in sorted(os.listdir(logs_path)):
+        version_path = os.path.join(logs_path, version)
+        for f in os.listdir(version_path):
+            if f.startswith('events'):
+                ea = EventAccumulator(os.path.join(version_path, f))
+                ea.Reload()
+                print(f'=== {exp} ===')
+                for tag in sorted(ea.Tags().get('scalars', [])):
+                    vals = ea.Scalars(tag)
+                    if vals:
+                        print(f'  {tag}: {vals[-1].value:.6f} (epoch {len(vals)-1})')
+\""
+```
+
+### Quick status check
+```bash
+# Check checkpoints (shows completed epochs)
+for host in lambda lambda-mlp lambda-contrastive; do
+  echo "=== $host ==="
+  ssh $host "ls ~/DiariZen/exp/*/checkpoints/ 2>/dev/null"
+done
+
+# Check GPU utilization
+for host in lambda lambda-mlp lambda-contrastive; do
+  echo "=== $host ==="
+  ssh $host "nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader"
+done
+```
+
+### Watch raw logs (mostly warnings)
+```bash
+ssh ubuntu@<IP> "tail -f /tmp/train_*.log | grep -v 'dummy embeddings'"
 ```
 
 ---

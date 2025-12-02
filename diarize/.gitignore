@@ -1,0 +1,24 @@
+# Model checkpoints (large files)
+checkpoints/
+*.ckpt
+*.pt
+
+# Training logs
+logs/
+
+# Results and predictions
+results/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Data
+data/
+*.wav
+*.mp3
+
+# IDE
+.vscode/
+.idea/

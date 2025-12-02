@@ -872,3 +872,145 @@ Using the new framework:
 **See:** `~/Developer/FEASIBILITY_CALIBRATION.md` for the full framework.
 
 ---
+
+## Phase 3: Training & Evaluation (2024-12-02)
+
+### Training Setup
+
+**Infrastructure:**
+- 3x Lambda A100 instances running in parallel
+- Total training cost: ~$20
+- ~6 hours wall clock time
+
+**Models Trained:**
+| Model | Epochs | Early Stop | Checkpoint |
+|-------|--------|------------|------------|
+| Transformer | 6 | Yes | 42MB |
+| MLP | 20 | No | 9.4MB |
+| Contrastive | 5 | Yes | 8.3MB |
+
+### Synthetic Validation Results
+
+| Model | Best val_mae | Epoch | Notes |
+|-------|--------------|-------|-------|
+| **MLP** | **2.2ms** | 15 | Steadily improved |
+| Transformer | 2.9ms | 1 | Converged immediately |
+| Contrastive | 21.8ms | 0 | Different objective |
+
+**Observation:** These metrics are on synthetic data (GT + Gaussian noise). They measure the wrong thing.
+
+### Real-World Evaluation
+
+Evaluated on actual DiariZen predictions (not synthetic test data):
+
+**DiariZen Baseline Boundary Error:**
+| Metric | Value |
+|--------|-------|
+| Mean error | **188.8ms** |
+| Median error | 88.0ms |
+| Std error | 322.8ms |
+| @50ms accuracy | 29.3% |
+| @100ms accuracy | 55.3% |
+| @200ms accuracy | 79.7% |
+
+**Critical Finding:** The Day 3 estimate of 923ms average boundary error was incorrect. DiariZen's actual boundary error is 188.8ms - nearly 5x better than estimated.
+
+**Refinement Results:**
+| Model | Mean Error After | Change | Verdict |
+|-------|------------------|--------|---------|
+| Transformer | 188.8ms | **0.0%** | No effect |
+| MLP | 191.1ms | **-1.2%** | Made worse |
+
+### Decision Gate 4: FAIL
+
+From PLAN.md:
+> "Does ANY variant improve boundary precision by >10%?"
+
+**Result:** No variant improved boundaries. Best case (Transformer) had zero effect.
+
+### Root Cause Analysis
+
+**Why synthetic training didn't generalize:**
+
+1. **Distribution mismatch:**
+   - Training: GT + Gaussian noise (σ=300ms)
+   - Reality: DiariZen errors (188.8ms mean, non-Gaussian distribution)
+
+2. **Task mismatch:**
+   - Learned: "Denoise large random perturbations back to center"
+   - Needed: "Correct small systematic biases in real predictions"
+
+3. **Magnitude mismatch:**
+   - Training noise: 300ms std (large)
+   - Real errors: 88ms median (small, already good)
+
+**Why the original 923ms estimate was wrong:**
+
+The Day 3 `analyze_boundary_errors.py` script likely measured all segment boundary misalignments (including same-speaker segment breaks), not specifically speaker-change transitions. The 188.8ms figure from `evaluate_on_diarizen_predictions.py` measures matched speaker transitions only.
+
+### Hypothesis Status
+
+**Original Hypothesis:**
+> "Boundary jitter (~923ms) is ~50% of remaining DER. Targeted refinement can beat SOTA."
+
+**Status: FALSIFIED**
+
+- DiariZen's boundary error is 188.8ms, not 923ms
+- 55% of boundaries already within 100ms
+- 80% of boundaries already within 200ms
+- No significant boundary problem exists to fix
+
+### Files Created (Phase 3)
+
+**Evaluation:**
+- `DiariZen/boundary_refinement/scripts/evaluate_on_diarizen_predictions.py`
+
+**Results:**
+- `diarize/EXPERIMENT_RESULTS.md` - Full experiment documentation
+- `diarize/results/voxconverse_dev/` - 216 DiariZen prediction RTTM files
+
+**Checkpoints:**
+- `diarize/checkpoints/transformer_best.ckpt`
+- `diarize/checkpoints/mlp_best.ckpt`
+- `diarize/checkpoints/contrastive_best.ckpt`
+
+**Logs:**
+- `diarize/logs/transformer/` - Training logs + TensorBoard
+- `diarize/logs/mlp/` - Training logs + TensorBoard
+
+### Compute & Cost Tracking
+
+| Date | Instance | Hours | Cost | Purpose |
+|------|----------|-------|------|---------|
+| 2024-12-02 | Lambda A100 (transformer) | ~6 | ~$7.75 | Training + inference |
+| 2024-12-02 | Lambda A100 (mlp) | ~4 | ~$5.15 | Training |
+| 2024-12-02 | Lambda A100 (contrastive) | ~5 | ~$6.45 | Training |
+| **Phase 3 Total** | | ~15 | **~$19.35** | |
+
+**Total Project Spend:** $0.72 (Phase 1-2) + $19.35 (Phase 3) = **~$20**
+**Budget Remaining:** ~$980 / $1000
+
+### Lessons Learned
+
+1. **Validate error estimates before building solutions** - The 923ms figure was wrong; should have verified with real predictions earlier.
+
+2. **Synthetic training ≠ real-world performance** - Models that excel on synthetic validation can fail completely on real data.
+
+3. **Decision gates work** - Gate 4 caught this failure before spending more resources on iteration.
+
+4. **Fast failure is valuable** - Spent ~$20 and 1 day to falsify hypothesis. Better than spending $200 and 2 weeks.
+
+---
+
+## Project Status Summary
+
+| Phase | Status | Outcome |
+|-------|--------|---------|
+| Phase 1 (Validation) | ✅ Complete | DiariZen baseline established |
+| Phase 2 (Implementation) | ✅ Complete | 3 model variants built |
+| Phase 3 (Training) | ✅ Complete | **Hypothesis falsified** |
+| Phase 4 (Iteration) | ⏸️ On hold | Pending decision on next steps |
+
+**Decision Required:** Continue with Option A/B/C from NEXT_STEPS.md or close project.
+
+---
