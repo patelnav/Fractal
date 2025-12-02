@@ -873,7 +873,7 @@ Using the new framework:
 
 ---
 
-## Phase 3: Training & Evaluation (2024-12-02)
+## Phase 3: Training & Evaluation (2025-12-02)
 
 ### Training Setup
 
@@ -982,9 +982,9 @@ The Day 3 `analyze_boundary_errors.py` script likely measured all segment bounda
 
 | Date | Instance | Hours | Cost | Purpose |
 |------|----------|-------|------|---------|
-| 2024-12-02 | Lambda A100 (transformer) | ~6 | ~$7.75 | Training + inference |
-| 2024-12-02 | Lambda A100 (mlp) | ~4 | ~$5.15 | Training |
-| 2024-12-02 | Lambda A100 (contrastive) | ~5 | ~$6.45 | Training |
+| 2025-12-02 | Lambda A100 (transformer) | ~6 | ~$7.75 | Training + inference |
+| 2025-12-02 | Lambda A100 (mlp) | ~4 | ~$5.15 | Training |
+| 2025-12-02 | Lambda A100 (contrastive) | ~5 | ~$6.45 | Training |
 | **Phase 3 Total** | | ~15 | **~$19.35** | |
 
 **Total Project Spend:** $0.72 (Phase 1-2) + $19.35 (Phase 3) = **~$20**

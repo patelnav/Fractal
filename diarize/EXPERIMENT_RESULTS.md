@@ -1,6 +1,6 @@
 # Boundary Refinement Experiment Results
 
-**Date**: December 2, 2024
+**Date**: December 2, 2025
 **Dataset**: VoxConverse dev (216 files)
 **Baseline System**: DiariZen (BUT-FIT/diarizen-wavlm-large-s80-md)
 
@@ -205,5 +205,5 @@ diarize/results/voxconverse_dev/
 
 ---
 
-*Document created: December 2, 2024*
-*Last updated: December 2, 2024 - All evaluations complete*
+*Document created: December 2, 2025*
+*Last updated: December 2, 2025 - All evaluations complete*
